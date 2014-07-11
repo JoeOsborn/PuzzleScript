@@ -794,7 +794,9 @@ function DoUndo(force) {
 		var tobackup = backups[backups.length-1];
 		restoreLevel(tobackup);
 		backups = backups.splice(0,backups.length-1);
-		tryPlayUndoSound();
+		if (! force) {
+			tryPlayUndoSound();
+		}
 	}
 }
 
@@ -1247,10 +1249,11 @@ var STRIDE_MOV = 1;
 function CellPattern(row) {
 	this.objectsPresent = row[0];
 	this.objectsMissing = row[1];
-	this.movementsPresent = row[2];
-	this.movementsMissing = row[3];
+	this.anyObjectsPresent = row[2];
+	this.movementsPresent = row[3];
+	this.movementsMissing = row[4];
 	this.matches = this.generateMatchFunction();
-	this.replacement = row[4];
+	this.replacement = row[5];
 };
 
 function CellReplacement(row) {
@@ -1293,6 +1296,15 @@ CellPattern.prototype.generateMatchString = function() {
 		}
 		if (mm)
 			fn += '\t\t&& !(' + cm + '&' + mm + ')\n';
+	}
+	for (var j = 0; j < this.anyObjectsPresent.length; j++) {
+		fn += "\t\t&& (0";
+		for (var i = 0; i < STRIDE_OBJ; ++i) {
+			var aop = this.anyObjectsPresent[j].data[i];
+			if (aop)
+				fn += "|(cellObjects" + i + "&" + aop + ")";
+		}
+		fn += ")";
 	}
 	fn += '\t)';
 	return fn;
@@ -2182,12 +2194,10 @@ function processInput(dir,dontCheckWin,dontModify) {
         	if (somemoved===false) {
         		if (verbose_logging){
 	    			consolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
-	    		}
+	    			consoleCacheDump();
+        		}
         		backups.push(bak);
         		DoUndo(true);
-        		if (verbose_logging) {
-        			consoleCacheDump();
-        		}
         		return false;
         	}
         	//play player cantmove sounds here
@@ -2196,24 +2206,20 @@ function processInput(dir,dontCheckWin,dontModify) {
 	    if (level.commandQueue.indexOf('cancel')>=0) {
 			if (verbose_logging) {
 	    		consolePrint('CANCEL command executed, cancelling turn.');
+	    		consoleCacheDump();
 			}
     		backups.push(bak);
     		DoUndo(true);
-        		if (verbose_logging) {
-        			consoleCacheDump();
-        		}
     		return false;
 	    } 
 
 	    if (level.commandQueue.indexOf('restart')>=0) {
-			if (verbose_logging) {
-				consolePrint('RESTART command executed, reverting to restart state.');
+	    	if (verbose_logging) { 
+	    		consolePrint('RESTART command executed, reverting to restart state.');
+	    		consoleCacheDump();
 			}
     		backups.push(bak);
-	    	DoRestart(true);	
-    		if (verbose_logging) {
-    			consoleCacheDump();
-    		}
+	    	DoRestart(true);
     		return true;
 	    } 
 
@@ -2225,12 +2231,11 @@ function processInput(dir,dontCheckWin,dontModify) {
 	    for (var i=0;i<level.objects.length;i++) {
 	    	if (level.objects[i]!==bak.dat[i]) {
 				if (dontModify) {
-	        		backups.push(bak);
-	        		DoUndo(true);
-
 	        		if (verbose_logging) {
 	        			consoleCacheDump();
 	        		}
+	        		backups.push(bak);
+	        		DoUndo(true);
 					return true;
 				} else {
 					if (dir!==-1) {
@@ -2292,9 +2297,14 @@ function processInput(dir,dontCheckWin,dontModify) {
 	    }
 
 	    if (!winning) {
+			if (level.commandQueue.indexOf('checkpoint')>=0) {
+		    	if (verbose_logging) { 
+		    		consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
+				}
+				restartTarget=backupLevel();
+			}	 
+
 		    if (level.commandQueue.indexOf('again')>=0 && modified) {
-		    	var old_verbose_logging=verbose_logging;
-		    	//verbose_logging=false;
 		    	//first have to verify that something's changed
 		    	var oldmessagetext = messagetext;
 		    	var old_verbose_logging=verbose_logging;
@@ -2318,13 +2328,7 @@ function processInput(dir,dontCheckWin,dontModify) {
 
 			    messagetext = oldmessagetext;
 			    verbose_logging=old_verbose_logging;
-		    }
-			if (level.commandQueue.indexOf('checkpoint')>=0) {
-		    	if (verbose_logging) { 
-		    		consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
-				}
-				restartTarget=backupLevel();
-			}	    
+		    }   
 		}
 		    
 

@@ -532,11 +532,8 @@ function checkKey(e,justPressed) {
         {
             //undo
             if (textMode===false) {
-
-                if (canDump===true) {
-                    inputHistory.push("undo");
-                }
-            	DoUndo();
+                pushInput("undo");
+                DoUndo();
                 canvasResize(); // calls redraw
             	return prevent(e);
             }
@@ -546,9 +543,7 @@ function checkKey(e,justPressed) {
         {
         	if (textMode===false) {
         		if (justPressed) {
-	                if (canDump===true) {
-	                    inputHistory.push("restart");
-	                }
+	        		pushInput("restart");
 	        		DoRestart();
 	                canvasResize(); // calls redraw
             		return prevent(e);
@@ -665,12 +660,10 @@ function checkKey(e,justPressed) {
     	}
     } else {
 	    if (!againing && inputdir>=0) {
-            if (canDump===true) {
-                inputHistory.push(inputdir);
-            }
             if (inputdir===4 && ('noaction' in state.metadata)) {
 
             } else {
+                pushInput(inputdir);
                 if (processInput(inputdir)) {
                     redraw();
                 }
@@ -737,9 +730,7 @@ function update() {
         autotick+=deltatime;
         if (autotick>autotickinterval) {
             autotick=0;
-            if (canDump===true) {
-            	inputHistory.push("tick");            
-            }
+            pushInput("tick");
             if (processInput(-1)) {
                 redraw();
             }

@@ -70,6 +70,7 @@ java -jar ~/progs/closure.jar --js_output_file ../bin/js/scripts_compiled.js  \
 --js js/parser.js \
 --js js/editor.js \
 --js js/compiler.js \
+--js js/analyzer.js \
 --js js/console.js \
 --js js/soundbar.js \
 --js js/toolbar.js \

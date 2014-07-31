@@ -20,6 +20,7 @@ for post-launch credits, check out activty on github.com/increpare/PuzzleScript
 
 */
 
+var window;
 var compiling = false;
 var errorStrings = [];
 var errorCount=0;
@@ -569,7 +570,7 @@ var codeMirrorFn = function() {
                             }
                         default:
                         	{
-                        	window.console.logError("EEK shouldn't get here.");
+                        	logError("EEK shouldn't get here.");
                         	}
                         }
                         break;

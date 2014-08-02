@@ -14,6 +14,7 @@ if(!this.hasOwnProperty("compileAndAnalyze") ||
 
 var Analyzer = (function() {
 	var module = {};
+	var USE_WORKERS = false;
 
 	//Launch a web worker to do analysis without blocking the UI.
 	module.analyze = function(command,text,randomseed) {
@@ -23,14 +24,37 @@ var Analyzer = (function() {
 			var editor = code.editorreference;
 			text = editor.getValue()+"\n";
 		}
-		console.log("analyze "+command+" with "+randomseed+" for "+text);
-		killWorker("solve", 1);
-		startWorker("solve", 1, {
-			rules:text,
-			level:1,
-			seed:randomseed,
-			verbose:true
-		});
+		console.log("analyze "+command+" with "+randomseed+" in "+curlevel);
+		if(!state.levels[curlevel] || state.levels[curlevel].message) {
+			console.log("Skip analysis of regular level");
+			return;
+		}
+		if(USE_WORKERS) {
+			killWorker("solve", curlevel);
+			startWorker("solve", curlevel, {
+				rules:text,
+				level:curlevel,
+				seed:randomseed,
+				verbose:true
+			});
+		} else {
+			Solver.startSearch({
+				rules:text,
+				level:curlevel,
+				seed:randomseed,
+				verbose:true,
+				replyFn:function(type,msg) {
+					console.log(type+":"+JSON.stringify(msg));
+					switch(type) {
+						case "busy":
+							setTimeout(function() {
+								Solver.continueSearch(msg.continuation);
+							}, 10);
+							break;
+					}
+				}
+			});
+		}
 	}
 
 	var workers = [];
@@ -40,11 +64,6 @@ var Analyzer = (function() {
 	};
 
 	function killWorker(type,key) {
-		/*control.postMessage({
-		type:"kill",
-		workerType:"solve",
-		lookup:1
-	});*/
 		var w = getWorker(type,key,false);
 		if(!w) { return null; }
 		w.close();

@@ -15,6 +15,13 @@ if(!this.hasOwnProperty("compileAndAnalyze") ||
 var Analyzer = (function() {
 	var module = {};
 	var USE_WORKERS = false;
+	var INPUT_MAPPING = {};
+	INPUT_MAPPING[-1]="WAIT";
+	INPUT_MAPPING[0]="UP";
+	INPUT_MAPPING[1]="LEFT";
+	INPUT_MAPPING[2]="DOWN";
+	INPUT_MAPPING[3]="RIGHT";
+	INPUT_MAPPING[4]="ACT";
 
 	//Launch a web worker to do analysis without blocking the UI.
 	module.analyze = function(command,text,randomseed) {
@@ -44,12 +51,21 @@ var Analyzer = (function() {
 				seed:randomseed,
 				verbose:true,
 				replyFn:function(type,msg) {
-					console.log(type+":"+JSON.stringify(msg));
+					console.log("MSG:"+type+":"+JSON.stringify(msg));
 					switch(type) {
 						case "busy":
 							setTimeout(function() {
 								Solver.continueSearch(msg.continuation);
 							}, 10);
+							break;
+						case "solution":
+							consolePrint("Found solution ("+msg.solution.id+") of minimal cost "+msg.solution.g+":<br/>&nbsp;"+msg.solution.prefixes.map(
+								function(p){ 
+									return p.map(
+										function(d){return INPUT_MAPPING[d];}
+									).join(","); 
+								}).join("<br/>&nbsp;"));
+							consoleCacheDump();
 							break;
 					}
 				}

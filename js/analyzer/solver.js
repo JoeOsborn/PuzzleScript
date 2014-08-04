@@ -13,8 +13,8 @@ var Solver = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 
-	var ITERS_PER_CONTINUATION = 200;
-	var ITER_MAX = 20000;
+	var ITERS_PER_CONTINUATION = 400;
+	var ITER_MAX = 40000;
 
 	var VERBOSE = false;
 	var REPLY_FN = reply;
@@ -60,8 +60,8 @@ var Solver = (function() {
 			ACTIONS.push(ACTION);
 		}
 
-		open = [];//{};
-		closed = [];//{};
+		open = initSet();
+		closed = initSet();
 		q = new priority_queue.PriorityQueue(function(a,b) { return a.f-b.f; });
 		root = createOrFindNode(null,WAIT);
 		enqueueNode(root);
@@ -189,23 +189,42 @@ var Solver = (function() {
 		}, iteration:iter});
 	};
 
+	var arCounts;
+	function findCentroids() {
+		var arSums = new Int32Array(state.objectCount);
+		if(!arCounts || arSums.length != arCounts.length) {
+			arCounts = new Int32Array(state.objectCount);
+		}
+		for(i = 0; i < arSums.length; i++) {
+			arSums[i] = 0;
+			arCounts[i] = 0;
+		}
+		for(var i = 0; i < level.n_tiles; i++) {
+			var bitmask = level.getCellInto(i,_oA);
+			for(var bit = 0; bit < 32 * STRIDE_OBJ; ++bit) {
+				if(bitmask.get(bit)) {
+					arCounts[bit]++;
+					arSums[bit] += i;
+				}
+			}
+		}
+		for(i = 0; i < arSums.length; i++) {
+			arSums[i] /= arCounts[i];
+		}
+		return arSums;
+	}
+
 	function createOrFindNode(pred, action) {
 		var backup = backupLevel();
-		var h = calculateH();
-		if(h == null) { throw Error("Null heuristic value because I am a dummy"); }
-		var g = pred ? pred.g+1 : 0;
 		var n = {
 			id:nodeId,
 			backup:backup,
-			//optimization(?):
-			//objectCounts:new Array(state.objectCount),
-			g:g,
-			h:h,
-			f:g+h,
 			predecessors:[],
 			//successors:[],
 			winning:winning,
-			eventualSolutions:[]
+			eventualSolutions:[],
+			//indexing optimization:
+			objectCentroids:findCentroids()
 		};
 		var existingN = member(n,closed) || member(n,open);
 		if(existingN) {
@@ -224,6 +243,12 @@ var Solver = (function() {
 			existingN.f = existingN.g + existingN.h;*/
 			return existingN;
 		}
+		var h = calculateH();
+		if(h == null) { throw Error("Null heuristic value because I am a dummy"); }
+		var g = pred ? pred.g+1 : 0;
+		n.g = g;
+		n.h = h;
+		n.f = g+h;
 		nodeId++;
 		if(pred) {
 			//log("A add "+pred.id+":"+action+" to "+n.id);
@@ -433,14 +458,19 @@ var Solver = (function() {
 		return -1;
 	}
 
+	function initSet() {
+		return {};
+	}
+	
 	function getInnerSet(node,set) {
 		var innerSet = set;
-		//optimization(?):
-		/*for(var i = 0; i < node.objectCounts.length; i++) {
-			if(!innerSet[node.objectCounts[i]]) {
-				innerSet[node.objectCounts[i]] = (i == node.objectCounts.length - 1) ? [] : {};
+		var ocs = node.objectCentroids;
+		for(var i = 0; i < ocs.length; i++) {
+			if(!innerSet[ocs[i]]) {
+				innerSet[ocs[i]] = (i == ocs.length - 1) ? [] : {};
 			}
-		}*/
+			innerSet = innerSet[ocs[i]];
+		}
 		return innerSet;
 	}
 

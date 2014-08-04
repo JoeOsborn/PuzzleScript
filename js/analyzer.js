@@ -45,6 +45,7 @@ var Analyzer = (function() {
 				verbose:true
 			});
 		} else {
+			var solutions = 0;
 			Solver.startSearch({
 				rules:text,
 				level:curlevel,
@@ -59,11 +60,12 @@ var Analyzer = (function() {
 							}, 10);
 							break;
 						case "solution":
-							consolePrint("Found solution ("+msg.solution.id+") of minimal cost "+msg.solution.g+":<br/>&nbsp;"+msg.solution.prefixes.map(
-								function(p){ 
+							solutions++;
+							consolePrint("Found solution #"+solutions+" (n"+msg.solution.id+") of first-found cost "+msg.solution.g+" at iteration "+msg.iteration+":<br/>&nbsp;"+msg.solution.prefixes.map(
+								function(p){
 									return p.map(
 										function(d){return INPUT_MAPPING[d];}
-									).join(","); 
+									).join(",");
 								}).join("<br/>&nbsp;"));
 							consoleCacheDump();
 							break;

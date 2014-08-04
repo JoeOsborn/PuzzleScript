@@ -32,6 +32,10 @@ exports.PriorityQueue = function PriorityQueue(compare, queue) {
     return t;
   }
 
+	this.peek = function peek() {
+		return queue[0];
+	}
+
   this.push = function push(/* element, ... */) {
     var i = queue.length, e = i + arguments.length, j, p;
     queue.push.apply(queue, arguments);
@@ -58,4 +62,4 @@ var max_first = exports.max_first = function max_first(a, b) { return b - a }
   , min_first = exports.min_first = function min_first(a, b) { return a - b }
   ;
 
-})(); // end of namespace 
+})(); // end of namespace

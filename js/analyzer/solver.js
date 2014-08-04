@@ -22,7 +22,7 @@ var Solver = (function() {
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
 
 	var INIT_LEVEL;
-	
+
 	var ACTIONS;
 
 	var nodeId=0;
@@ -51,7 +51,7 @@ var Solver = (function() {
 			REPLY_FN("exhausted", {level:LEVEL, iterations:0});
 			return;
 		}
-		
+
 		ACTIONS = [UP, DOWN, LEFT, RIGHT];
 		if(autotickinterval > 0) {
 			ACTIONS.push(WAIT);
@@ -146,9 +146,9 @@ var Solver = (function() {
 		return ret;
 	}
 	function prefixesLoopcheck(n,visited) {
-		if(n.id in visited) { 
+		if(n.id in visited) {
 			//log("return "+JSON.stringify(visited[n.id])+" for "+n.id);
-			return visited[n.id]; 
+			return visited[n.id];
 		}
 		visited[n.id] = [];
 		var ret = [];
@@ -177,16 +177,6 @@ var Solver = (function() {
 			prefixes:prefixes(currentNode)
 		}, iteration:iter});
 	};
-
-	function shortest(ars) {
-		var shortest = ars[0];
-		for(var i=1; i < ars.length; i++) {
-			if(ars[i].length < shortest.length) {
-				shortest = ars[i];
-			}
-		}
-		return shortest;
-	}
 
 	function createOrFindNode(pred, action) {
 		var backup = backupLevel();

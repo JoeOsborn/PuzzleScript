@@ -13,13 +13,17 @@ var Solver = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 
-	var ITERS_PER_CONTINUATION = 400;
-	var ITER_MAX = 40000;
+	var ITERS_PER_CONTINUATION = 500;
+	var ITER_MAX = 20000;
 
 	var VERBOSE = false;
 	var REPLY_FN = reply;
 	var LEVEL = 0, RULES = "", SEED = null;
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
+	
+	var FIRST_SOLN_ONLY = true;
+	var SKIP_H = false;
+	var G_DISCOUNT = 0.1;
 
 	var INIT_LEVEL;
 
@@ -30,6 +34,7 @@ var Solver = (function() {
 	var root;
 
 	module.startSearch = function(config) {
+		nodeId=0;
 		OLD_TESTING = unitTesting;
 		OLD_AUTO_ADVANCE = testsAutoAdvanceLevel;
 		LEVEL = config.level;
@@ -118,6 +123,14 @@ var Solver = (function() {
 				if(winning) {
 					//log("WIN");
 					postSolution(currentNode, iter);
+					
+					if(FIRST_SOLN_ONLY) {
+						q = new priority_queue.PriorityQueue();
+						open = initSet();
+						closed = initSet();
+						return;
+					}
+					
 					//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!
 					addEventualSolution(currentNode.predecessors,currentNode);
 				} else if(currentNode != root &&
@@ -129,6 +142,7 @@ var Solver = (function() {
 					for(var esi in currentNode.eventualSolutions) {
 						var es = currentNode.eventualSolutions[esi];
 						postSolution(es,iter);
+						addEventualSolution([{predecessor:node, action:action}],es);
 					}
 				}
 			}
@@ -224,7 +238,8 @@ var Solver = (function() {
 			winning:winning,
 			eventualSolutions:[],
 			//indexing optimization:
-			objectCentroids:findCentroids()
+			objectCentroids:findCentroids(),
+			f:null, g:null, h:null
 		};
 		var existingN = member(n,closed) || member(n,open);
 		if(existingN) {
@@ -244,8 +259,7 @@ var Solver = (function() {
 			return existingN;
 		}
 		var h = calculateH();
-		if(h == null) { throw Error("Null heuristic value because I am a dummy"); }
-		var g = pred ? pred.g+1 : 0;
+		var g = pred ? pred.g+1*G_DISCOUNT : 0;
 		n.g = g;
 		n.h = h;
 		n.f = g+h;
@@ -264,60 +278,7 @@ var Solver = (function() {
 
 	var _oA = new BitVec(STRIDE_OBJ);
 	var _oB = new BitVec(STRIDE_OBJ);
-	/*function calculateAdmissibleH() {
-		var h = 0;
-		if (state.winconditions.length>0)  {
-			for (var wcIndex=0;wcIndex<state.winconditions.length;wcIndex++) {
-				var wincondition = state.winconditions[wcIndex];
-				var filter1 = wincondition[1]; //"X"; if univ, will always pass
-				var filter2 = wincondition[2]; //"Y"; if empty, will always pass
-				switch(wincondition[0]) {
-					case -1://NO
-						{
-							for (var i=0;i<level.n_tiles;i++) {
-								var cell = level.getCellInto(i,_oA);
-								if ( (!filter1.bitsClearInArray(cell.data)) &&
-										(!filter2.bitsClearInArray(cell.data)) ) {
-									h++;
-								}
-							}
-							break;
-						}
-					case 0://SOME
-						{
-							var passedTest=false;
-							for (var i=0;i<level.n_tiles;i++) {
-								var cell = level.getCellInto(i,_oA);
-								if ( (!filter1.bitsClearInArray(cell.data)) &&
-										(!filter2.bitsClearInArray(cell.data)) ) {
-									passedTest=true;
-									break;
-								}
-							}
-							if (passedTest===false) {
-								h=1;
-							}
-							break;
-						}
-					case 1://ALL
-						{
-							for (var i=0;i<level.n_tiles;i++) {
-								var cell = level.getCellInto(i,_oA);
-								if ( (!filter1.bitsClearInArray(cell.data)) &&
-										(filter2.bitsClearInArray(cell.data)) ) {
-									h++;
-								}
-							}
-							break;
-						}
-				}
-			}
-		}
-		//if(any [...] -> WIN rule) {
-		//  h = min(h, rh);
-		//}
-		return h;
-	}*/
+
 	var max = Math.max;
 	var min = Math.min;
 	var floor = Math.floor;
@@ -325,6 +286,7 @@ var Solver = (function() {
 
 	function calculateH() {
 		var h = 0;
+		if(SKIP_H) { return h; }
 		if (state.winconditions.length>0)  {
 			for (var wcIndex=0;wcIndex<state.winconditions.length;wcIndex++) {
 				var wincondition = state.winconditions[wcIndex];
@@ -347,10 +309,11 @@ var Solver = (function() {
 						{
 							//min distance between any X and its nearest Y
 							var minDist = Infinity;
-							var anyYs = false;
+							var anyXs = false;
 							for (var i=0;i<level.n_tiles;i++) {
 								var cell = level.getCellInto(i,_oA);
 								if ( (!filter1.bitsClearInArray(cell.data)) ) {
+									anyXs = true;
 									var nearest = findNearest(filter2,i);
 									//no Y!
 									//it's not clear what a reasonable value would be.
@@ -358,7 +321,6 @@ var Solver = (function() {
 									//and hope that the next turn will produce a Y.
 									//Put another way, we have "an unsatisfied X".
 									if(nearest == -1) {
-										log("NO Y");
 										minDist = min(minDist,1);
 									}
 									minDist = min(minDist, distance(nearest,i));
@@ -366,7 +328,7 @@ var Solver = (function() {
 									if(minDist == 0) { break; }
 								}
 							}
-							h += minDist;
+							h += anyXs ? minDist : 1;
 							break;
 						}
 					case 1://ALL

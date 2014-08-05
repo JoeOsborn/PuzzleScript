@@ -61,7 +61,7 @@ var Analyzer = (function() {
 							break;
 						case "solution":
 							solutions++;
-							consolePrint("Found solution #"+solutions+" (n"+msg.solution.id+") of first-found cost "+msg.solution.g+" at iteration "+msg.iteration+":<br/>&nbsp;"+msg.solution.prefixes.map(
+							consolePrint("Found solution #"+solutions+" (n"+msg.solution.id+") of first-found cost "+msg.solution.prefixes[0].length+" at iteration "+msg.iteration+":<br/>&nbsp;"+msg.solution.prefixes.map(
 								function(p){
 									return p.map(
 										function(d){return INPUT_MAPPING[d];}

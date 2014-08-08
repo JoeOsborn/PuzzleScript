@@ -14,7 +14,7 @@ if(!this.hasOwnProperty("compileAndAnalyze") ||
 
 var Analyzer = (function() {
 	var module = {};
-	var USE_WORKERS = false;
+	var USE_WORKERS = true;
 	var INPUT_MAPPING = {};
 	INPUT_MAPPING[-1]="WAIT";
 	INPUT_MAPPING[0]="UP";
@@ -120,12 +120,27 @@ var Analyzer = (function() {
 		w.key = key;
 
 		w.onmessage = function(msg) {
-			console.log("got "+JSON.stringify(msg.data));
-			if(msg.data.type == "busy") {
-				workers[msg.data.id].postMessage({
-					type:"resume",
-					continuation:msg.data.continuation
-				});
+			var type = msg.data.type;
+			console.log("MSG:"+type+":"+JSON.stringify(msg.data));
+			switch(type) {
+				case "busy":
+					workers[msg.data.id].postMessage({
+						type:"resume",
+						continuation:msg.data.continuation
+					});
+					break;
+				case "solution":
+					solutions++;
+					consolePrint("Found solution #"+solutions+" (n"+msg.data.solution.id+") of first-found cost "+msg.data.solution.prefixes[0].length+" at iteration "+msg.data.iteration+":<br/>&nbsp;"+msg.data.solution.prefixes.map(
+						function(p){
+							return p.map(
+								function(d){return INPUT_MAPPING[d];}
+							).join(",");
+						}).join("<br/>&nbsp;"));
+					consoleCacheDump();
+					break;
+				default:
+					break;
 			}
 		};
 		w.onerror = function(event) {

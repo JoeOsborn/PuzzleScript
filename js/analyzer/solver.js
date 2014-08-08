@@ -1,5 +1,8 @@
 "use strict";
 
+//if I'm in a worker, require a bunch of scripts
+blah blah blah
+
 var reply;
 var postMessage, compile, justCompile;
 
@@ -13,8 +16,8 @@ var Solver = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 
-	var ITERS_PER_CONTINUATION = 500;
-	var ITER_MAX = 20000;
+	var ITERS_PER_CONTINUATION = 2000;
+	var ITER_MAX = 100000;
 
 	var VERBOSE = false;
 	var REPLY_FN = reply;
@@ -82,6 +85,7 @@ var Solver = (function() {
 			REPLY_FN("busy", {
 				continuation:iters,
 				queueLength:q.length,
+				nodeCount:nodeId,
 				minG:(q.peek() ? q.peek().g : -1),
 				minH:(q.peek() ? q.peek().h : -1)
 			});
@@ -93,6 +97,7 @@ var Solver = (function() {
 				level:LEVEL,
 				iterations:iters,
 				queueLength:q.length,
+				nodeCount:nodeId,
 				minG:(q.peek() ? q.peek().g : -1),
 				minH:(q.peek() ? q.peek().h : -1)
 			});
@@ -142,7 +147,7 @@ var Solver = (function() {
 					for(var esi in currentNode.eventualSolutions) {
 						var es = currentNode.eventualSolutions[esi];
 						postSolution(es,iter);
-						addEventualSolution([{predecessor:node, action:action}],es);
+						addEventualSolution([{action:action, predecessor:node}],es);
 					}
 				}
 			}
@@ -203,45 +208,48 @@ var Solver = (function() {
 		}, iteration:iter});
 	};
 
-	var arCounts;
-	function findCentroids() {
-		var arSums = new Int32Array(state.objectCount);
-		if(!arCounts || arSums.length != arCounts.length) {
+	var arCounts, tempCentroids;
+	function findCentroids(into) {
+		if(!into || into.length != state.objectCount) { into = new Int32Array(state.objectCount); }
+		if(!arCounts || into.length != arCounts.length) {
 			arCounts = new Int32Array(state.objectCount);
 		}
-		for(i = 0; i < arSums.length; i++) {
-			arSums[i] = 0;
+		for(i = 0; i < into.length; i++) {
+			into[i] = 0;
 			arCounts[i] = 0;
 		}
 		for(var i = 0; i < level.n_tiles; i++) {
 			var bitmask = level.getCellInto(i,_oA);
 			for(var bit = 0; bit < 32 * STRIDE_OBJ; ++bit) {
 				if(bitmask.get(bit)) {
-					arCounts[bit]++;
-					arSums[bit] += i;
+					arCounts[bit] += 1;
+					into[bit] += i;
 				}
 			}
 		}
-		for(i = 0; i < arSums.length; i++) {
-			arSums[i] /= arCounts[i];
+		for(i = 0; i < into.length; i++) {
+			into[i] = (into[i] / arCounts[i]) | 0;
 		}
-		return arSums;
+		return into;
 	}
 
+	var tempNode = {
+		id:-1,
+		backup:null,
+		predecessors:[],
+		//successors:[],
+		winning:false,
+		eventualSolutions:[],
+		//indexing optimization:
+		objectCentroids:tempCentroids,
+		f:null, g:null, h:null
+	};
+
 	function createOrFindNode(pred, action) {
-		var backup = backupLevel();
-		var n = {
-			id:nodeId,
-			backup:backup,
-			predecessors:[],
-			//successors:[],
-			winning:winning,
-			eventualSolutions:[],
-			//indexing optimization:
-			objectCentroids:findCentroids(),
-			f:null, g:null, h:null
-		};
-		var existingN = member(n,closed) || member(n,open);
+		tempCentroids = findCentroids(tempCentroids);
+		tempNode.winning = winning;
+		tempNode.objectCentroids = tempCentroids;
+		var existingN = member(tempNode,closed) || member(tempNode,open);
 		if(existingN) {
 			if(pred) {
 				//pred.successors[action] = existingN;
@@ -258,11 +266,20 @@ var Solver = (function() {
 			existingN.f = existingN.g + existingN.h;*/
 			return existingN;
 		}
+		//actually make a node data structure
 		var h = calculateH();
 		var g = pred ? pred.g+1*G_DISCOUNT : 0;
-		n.g = g;
-		n.h = h;
-		n.f = g+h;
+		var n = {
+			id:nodeId,
+			backup:backupLevel(),
+			predecessors:[],
+			//successors:[],
+			winning:winning,
+			eventualSolutions:[],
+			//indexing optimization:
+			objectCentroids:new Int32Array(tempCentroids),
+			f:g+h, g:g, h:h
+		};
 		nodeId++;
 		if(pred) {
 			//log("A add "+pred.id+":"+action+" to "+n.id);
@@ -370,15 +387,12 @@ var Solver = (function() {
 		var jy = j - jx*level.height;
 		return abs(ix-jx) + abs(iy-jy);
 	}
-	function check(filt, i) {
-		var cell = level.getCellInto(i,_oB);
-		return !filt.bitsClearInArray(cell.data);
-	}
 	function findNearest(filt, i) {
-		var maxD = level.width+level.height;
-		var cx = floor(i / level.height);
-		var cy = i - cx*level.height;
-		var j;
+		var maxD = (level.width+level.height)|0;
+		var cx = (i / level.height)|0;
+		var cy = (i - cx*level.height)|0;
+		var j=0;
+		var cell;
 		for(var d=0; d < maxD; d++) {
 			for(var row=0; row < d+1; row++) {
 				var lx = cx - d + row;
@@ -386,26 +400,30 @@ var Solver = (function() {
 				var ly = cy - row;
 				var hy = cy + row;
 				if(lx >= 0 && ly >= 0) {
-					j = ly+lx*level.height;
-					if(check(filt,j)) {
+					j = (ly+lx*level.height)|0;
+					cell = level.getCellInto(j,_oB);
+					if(!filt.bitsClearInArray(cell.data)) {
 						return j;
 					}
 				}
 				if(lx >= 0 && hy < level.height) {
-					j = hy+lx*level.height;
-					if(check(filt,j)) {
+					j = (hy+lx*level.height)|0;
+					cell = level.getCellInto(j,_oB);
+					if(!filt.bitsClearInArray(cell.data)) {
 						return j;
 					}
 				}
 				if(hx < level.width && ly >= 0) {
-					j = ly+hx*level.height;
-					if(check(filt,j)) {
+					j = (ly+hx*level.height)|0;
+					cell = level.getCellInto(j,_oB);
+					if(!filt.bitsClearInArray(cell.data)) {
 						return j;
 					}
 				}
 				if(hx < level.width && hy < level.height) {
-					j = hy+hx*level.height;
-					if(check(filt,j)) {
+					j = (hy+hx*level.height)|0;
+					cell = level.getCellInto(j,_oB);
+					if(!filt.bitsClearInArray(cell.data)) {
 						return j;
 					}
 				}
@@ -416,7 +434,7 @@ var Solver = (function() {
 				return -1;
 			}*/
 		}
-		log("Just didn't find anything within "+maxD);
+		//log("Just didn't find anything within "+maxD);
 		return -1;
 	}
 
@@ -438,7 +456,12 @@ var Solver = (function() {
 
 	function equiv(n1,n2) {
 		if(n1.winning != n2.winning) { return false; }
-		var n1BakObjs = n1.backup.dat;
+		var n1BakObjs = null;
+		if(n1.backup) {
+			n1BakObjs = n1.backup.dat;
+		} else {
+			n1BakObjs = level.objects;
+		}
 		var n2BakObjs = n2.backup.dat;
 		if(n1BakObjs.length != n2BakObjs.length) { return false; }
 		for(var i=0; i < n1BakObjs.length; i++) {
@@ -505,7 +528,7 @@ var Solver = (function() {
 		titleMode=0;
 		textMode=false;
 		restoreLevel(searchState.backup);
-		backups=[];
+		backups.splice(0,backups.length);
 		restartTarget=searchState.backup;
 	};
 

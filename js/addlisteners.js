@@ -18,5 +18,7 @@ attach(window, 'blur', onMyBlur);
 
 // Lights, camera…function!
 setInterval(function() {
-    update();
+	if(!unitTesting) {
+		update();
+	}
 }, deltatime);

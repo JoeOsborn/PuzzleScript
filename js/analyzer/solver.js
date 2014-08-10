@@ -1,10 +1,6 @@
 "use strict";
 
-//if I'm in a worker, require a bunch of scripts
-blah blah blah
-
-var reply;
-var postMessage, compile, justCompile;
+var scope = self;
 
 var Solver = (function() {
 	var module = {};
@@ -17,10 +13,10 @@ var Solver = (function() {
 	var ACTION = 4;
 
 	var ITERS_PER_CONTINUATION = 2000;
-	var ITER_MAX = 100000;
+	var ITER_MAX = 20000;
 
 	var VERBOSE = false;
-	var REPLY_FN = reply;
+	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;
 	var LEVEL = 0, RULES = "", SEED = null;
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
 	
@@ -37,6 +33,8 @@ var Solver = (function() {
 	var root;
 
 	module.startSearch = function(config) {
+		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
+		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
 		nodeId=0;
 		OLD_TESTING = unitTesting;
 		OLD_AUTO_ADVANCE = testsAutoAdvanceLevel;
@@ -48,7 +46,7 @@ var Solver = (function() {
 			REPLY_FN = config.replyFn;
 		}
 
-		if(justCompile) {
+		if(scope.hasOwnProperty("justCompile")) {
 			justCompile(["loadLevel", LEVEL], RULES, SEED);
 		} else {
 			compile(["loadLevel", LEVEL], RULES, SEED);
@@ -293,8 +291,8 @@ var Solver = (function() {
 		q.push(n);
 	}
 
-	var _oA = new BitVec(STRIDE_OBJ);
-	var _oB = new BitVec(STRIDE_OBJ);
+	var _oA;
+	var _oB;
 
 	var max = Math.max;
 	var min = Math.min;

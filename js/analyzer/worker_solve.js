@@ -1,17 +1,19 @@
-"use strict";
+importScripts(
+	"worker_utils.js"
+);
 
 importScripts(
-	"worker_utils.js",
-/*	"../globalVariables.js",
+	"priority_queue.js",
+	"../globalVariables.js",
 	"../debug.js",
 	"../font.js",
 	"../rng.js",
 	"../colors.js",
 	"../engine.js",
 	"../parser.js",
-	"../compiler.js",*/
-	"solver.js"
+	"../compiler.js"
 );
+importScripts("solver.js");
 
 /*
 Protocol:

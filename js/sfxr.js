@@ -653,7 +653,7 @@ if (typeof AUDIO_CONTEXT == 'undefined') {
 }
 
 SoundEffect.generate = function(ps) {
-/*  window.console.log(ps.wave_type + "\t" + ps.seed);
+/*  consolePrint(ps.wave_type + "\t" + ps.seed);
 
   var psstring="";
   for (var n in ps) {
@@ -661,8 +661,8 @@ SoundEffect.generate = function(ps) {
       psstring = psstring +"result." + n+" = " + ps[n] + ";\n";
     }
   }
-window.console.log(ps);
-window.console.log(psstring);*/
+consolePrint(ps);
+consolePrint(psstring);*/
   function repeat() {
     rep_time = 0;
 

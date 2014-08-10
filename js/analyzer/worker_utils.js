@@ -6,9 +6,8 @@ var key = null;
 
 function reply(type, msg) {
 	var m = msg || {};
-	m.type = type;
 	m.id = id;
-	self.postMessage(m);
+	postMessage({type:type, id:id, message:m});
 }
 
 function workerDefault(msg) {
@@ -21,15 +20,17 @@ function workerDefault(msg) {
 			return false;
 		case "stop":
 			reply("stopped");
-			self.close();
+			terminate();
 			return true;
 	}
 	return false;
 }
 
 function error(msg) {
+	var err = new Error(msg);
+	msg += "\n" + err.stack;
 	notify("error", msg);
-	throw new Error(msg);
+	throw err;
 }
 
 function warn(msg) {
@@ -42,8 +43,8 @@ function log(msg) {
 
 function notify(severity, msg) {
 	if(id != -1) {
-		reply(severity, msg);
+		reply("message", {message:msg, severity:severity});
 	} else {
-		self.postMessage({type:severity, message:msg});
+		postMessage({type:"message", message:{message: msg, severity:severity}});
 	}
 }

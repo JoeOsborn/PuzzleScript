@@ -464,11 +464,11 @@ function mouseMove(event) {
 	    redraw();
     }
 
-    //window.console.log("showcoord ("+ canvas.width+","+canvas.height+") ("+x+","+y+")");
+    //consolePrint("showcoord ("+ canvas.width+","+canvas.height+") ("+x+","+y+")");
 }
 
 function mouseOut() {
-//  window.console.log("clear");
+//  consolePrint("clear");
 }
 
 function prevent(e) {
@@ -489,28 +489,28 @@ function checkKey(e,justPressed) {
         case 65://a
         case 37: //left
         {
-//            window.console.log("LEFT");
+//            consolePrint("LEFT");
             inputdir=1;
         break;
         }
         case 38: //up
         case 87: //w
         {
-//            window.console.log("UP");
+//            consolePrint("UP");
             inputdir=0;
         break;
         }
         case 68://d
         case 39: //right
         {
-//            window.console.log("RIGHT");
+//            consolePrint("RIGHT");
             inputdir=3;
         break;
         }
         case 83://s
         case 40: //down
         {
-//            window.console.log("DOWN");
+//            consolePrint("DOWN");
             inputdir=2;
         break;
         }
@@ -519,7 +519,7 @@ function checkKey(e,justPressed) {
         case 67://c
         case 88://x
         {
-//            window.console.log("ACTION");
+//            consolePrint("ACTION");
 			if (norepeat_action===false || justPressed) {
             	inputdir=4;
             } else {

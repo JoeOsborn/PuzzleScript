@@ -1,7 +1,8 @@
+var scope = self;
 (function() { // namespace
 
 var exports = (typeof module !== 'undefined' && module.exports) ?
-    module.exports : window.priority_queue = {};
+    module.exports : scope.priority_queue = {};
 
 exports.PriorityQueue = function PriorityQueue(compare, queue) {
   if (!(this instanceof PriorityQueue)) return new PriorityQueue(compare, queue);

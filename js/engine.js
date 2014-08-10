@@ -525,7 +525,7 @@ function setGameState(_state, command, randomseed) {
 	RandomGen = new RNG(randomseed);
 
 	state = _state;
-    window.console.log('setting game state :D ');
+    consolePrint('setting game state :D ');
     backups=[];
     //set sprites
     sprites = [];
@@ -1585,7 +1585,7 @@ function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask) {
 		}
     	default:
     	{
-    		window.console.log("EEEP "+direction);
+    		consolePrint("EEEP "+direction);
     	}
     }
 
@@ -1658,7 +1658,7 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask) {
 		}
     	default:
     	{
-    		window.console.log("EEEP2 "+direction);
+    		consolePrint("EEEP2 "+direction);
     	}
     }
 
@@ -1680,7 +1680,7 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask) {
 				} else if (direction === 8) { //right
 					kmax=level.width-(x+len)+1;	
 				} else {
-					window.console.log("EEEP2 "+direction);					
+					consolePrint("EEEP2 "+direction);					
 				}
 
 				result.push.apply(result, cellRowMatch(cellRow,i,kmax,0));
@@ -1701,7 +1701,7 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask) {
 				} else if (direction === 1) { // up
 					kmax=y-len+2;					
 				} else {
-					window.console.log("EEEP2 "+direction);
+					consolePrint("EEEP2 "+direction);
 				}
 				result.push.apply(result, cellRowMatch(cellRow,i,kmax,0));
 			}
@@ -2175,7 +2175,7 @@ function processInput(dir,dontCheckWin,dontModify) {
         }
 
         if (i>=50) {
-        	window.console.log("looped through 50 times, gave up.  too many loops!");
+        	consolePrint("looped through 50 times, gave up.  too many loops!");
         }
 
 

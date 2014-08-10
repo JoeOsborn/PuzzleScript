@@ -88,7 +88,7 @@ RC4.prototype.next = function() {
 function print_call_stack() {
   var e = new Error();
   var stack = e.stack;
-  console.log( stack );
+  consolePrint( stack );
 }
 /**
  * Create a new random number generator with optional seed. If the
@@ -101,7 +101,7 @@ function RNG(seed) {
     this.seed = seed;
     if (seed == null) {
         seed = (Math.random() + Date.now()).toString();
-        //window.console.log("setting random seed "+seed);
+        //consolePrint("setting random seed "+seed);
         //print_call_stack();
 
     } else if (typeof seed === 'function') {
@@ -114,7 +114,7 @@ function RNG(seed) {
     } else if (Object.prototype.toString.call(seed) !== '[object String]' && seed.constructor !== RNG) {
         seed = JSON.stringify(seed);
     } else {
-        //window.console.log("setting seed "+seed);
+        //consolePrint("setting seed "+seed);
         //print_call_stack();
     }
     this._normal = null;

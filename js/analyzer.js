@@ -84,7 +84,7 @@ var Analyzer = (function() {
 	function killWorker(type,key) {
 		var w = getWorker(type,key,false);
 		if(!w) { return null; }
-		w.close();
+		w.terminate();
 		workers[w.id] = null;
 		delete workerLookup[type][key];
 		return w;
@@ -107,6 +107,7 @@ var Analyzer = (function() {
 	}
 
 	function startWorker(type, key, init) {
+		var solutions = 0;
 		if(getWorker(type,key,false)) {
 			error("Can't start duplicate worker "+type+" : "+key)
 		}
@@ -121,17 +122,21 @@ var Analyzer = (function() {
 
 		w.onmessage = function(msg) {
 			var type = msg.data.type;
-			console.log("MSG:"+type+":"+JSON.stringify(msg.data));
+			var data = msg.data.message;
+			var id = msg.data.id;
 			switch(type) {
+				case "message":
+					console.log(""+data.severity + ":" + JSON.stringify(data.message));
+					break;
 				case "busy":
-					workers[msg.data.id].postMessage({
+					workers[id].postMessage({
 						type:"resume",
-						continuation:msg.data.continuation
+						continuation:data.continuation
 					});
 					break;
 				case "solution":
 					solutions++;
-					consolePrint("Found solution #"+solutions+" (n"+msg.data.solution.id+") of first-found cost "+msg.data.solution.prefixes[0].length+" at iteration "+msg.data.iteration+":<br/>&nbsp;"+msg.data.solution.prefixes.map(
+					consolePrint("Found solution #"+solutions+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+":<br/>&nbsp;"+data.solution.prefixes.map(
 						function(p){
 							return p.map(
 								function(d){return INPUT_MAPPING[d];}

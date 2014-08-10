@@ -54,7 +54,8 @@ var Solver = (function() {
 		INIT_LEVEL = backupLevel();
 
 		if (!state.levels[LEVEL] || state.levels[LEVEL].message) {
-			REPLY_FN("exhausted", {level:LEVEL, iterations:0});
+			REPLY_FN("exhausted", {level:LEVEL, iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1});
+			REPLY_FN("stopped");
 			return;
 		}
 
@@ -99,6 +100,7 @@ var Solver = (function() {
 				minG:(q.peek() ? q.peek().g : -1),
 				minH:(q.peek() ? q.peek().h : -1)
 			});
+			REPLY_FN("stopped");
 		}
 		testsAutoAdvanceLevel = OLD_AUTO_ADVANCE;
 		unitTesting = OLD_TESTING;
@@ -131,7 +133,7 @@ var Solver = (function() {
 						q = new priority_queue.PriorityQueue();
 						open = initSet();
 						closed = initSet();
-						return;
+						return iter;
 					}
 					
 					//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!

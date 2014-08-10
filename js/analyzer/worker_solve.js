@@ -17,19 +17,19 @@ importScripts("solver.js");
 
 /*
 Protocol:
-	>start: {id:ID}
+	>start: {id:ID,init:{rules: RuleText, level: LevelNumber, [seed:Seed,] verbose: Bool}}
 		<started:{id:ID}
-	>stop: {}
-		<stopped:{id:ID}
-	>solve: {rules: RuleText, level: LevelNumber, [seed:Seed,] verbose: Bool}
 		<solution: {id:ID, level: LevelNumber, solution: MoveList}
 		<exhausted: {id:ID, level: LevelNumber}
+		<stopped: {id:ID, ...}
 		<busy: {id:ID, continuation:Object}
 			>resume: {continuation:Object}
 		If verbose:
 		<open: {id:ID, state: State, prefix: MoveList}
 		<close: {id:ID, state: State}
 		<revisit: {id:ID, state: State, prefix: MoveList}
+	>stop: {}
+		<stopped:{id:ID}
 */
 
 self.onmessage = function(msg) {
@@ -42,10 +42,6 @@ self.onmessage = function(msg) {
 		case "start":
 			log("starting "+id);
 			Solver.startSearch(msg.data.init);
-			log("taking a break");
-			break;
-		case "solve":
-			Solver.startSearch(msg.data);
 			break;
 		case "resume":
 			log("resuming");

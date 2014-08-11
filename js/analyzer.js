@@ -17,6 +17,8 @@ var Analyzer = (function() {
 	var lastRules = "";
 	var gameRules = "";
 	var levelQueue = [];
+	var seenSolutions = {};
+	
 	var USE_WORKERS = true;
 	var INPUT_MAPPING = {};
 	INPUT_MAPPING[-1]="WAIT";
@@ -38,6 +40,7 @@ var Analyzer = (function() {
 		console.log("analyze "+command+" with "+randomseed+" in "+curlevel);
 		if(gameRules != lastRules) {
 			var solvers = getAllWorkers("solve");
+			//TODO: if this is a different game, nuke seenSolutions
 			//kill stale workers.
 			//TODO: only kill them if their levels' texts have changed or if the rules have changed.
 			for(var i = 0; i < solvers.length; i++) {
@@ -53,7 +56,8 @@ var Analyzer = (function() {
 	
 	function createLevelQueue(force, prioritize) {
 		//TODO: only add levels that have changed since last solution (unless the rules themselves have changed)
-		//TODO: try to bootstrap with the previously known solution to this level. see if it's still a solution and note a message if it's not. in any event, use the last found solution as a default hint.
+		//TODO: log a visible console message if the hint does not solve things by itself. in any event, use the last found solution as a default hint.
+		//TODO: permit "clearing" default hints.
 		var q = [];
 		for(var i = 0; i < prioritize.length; i++) {
 			if(state.levels[prioritize[i]] && !state.levels[prioritize[i]].message) {
@@ -78,12 +82,14 @@ var Analyzer = (function() {
 				rules:gameRules,
 				level:lev,
 				//seed:randomseed,
+				hint:seenSolutions[lev],
 				verbose:true
 			}, handleSolver, tickLevelQueue);
 		} else {
 			Solver.startSearch({
 				rules:gameRules,
 				level:lev,
+				hint:seenSolutions[lev],
 				//seed:randomseed,
 				verbose:true,
 				replyFn:function(type,msg) {
@@ -106,24 +112,46 @@ var Analyzer = (function() {
 		}
 	}
 	
+	function prefixToSolutionSteps(p) {
+		return p.map(
+			function(d){return INPUT_MAPPING[d];}
+		);
+	}
+	
 	//TODO: save solutions per-level (of course, nullify them if the game changes!)
 	function handleSolver(id,type,data) {
 		switch(type) {
 			case "solution":
-				consolePrint("Level "+data.level+": Found solution #"+1+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+":<br/>&nbsp;"+data.solution.prefixes.map(
-					function(p){
-						return p.map(
-							function(d){return INPUT_MAPPING[d];}
-						).join(",");
-					}).join("<br/>&nbsp;"));
+				consolePrint("Level "+data.level+": Found solution #"+1+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+":<br/>&nbsp;"+data.solution.prefixes.map(function(p) { return prefixToSolutionSteps(p).join(","); }).join("<br/>&nbsp;"));
+				if(data.iteration == 0) {
+					consolePrint("&nbsp;(Thanks to hint from last time)");
+				}
+				recordSolution(workers[id].init.rules, workers[id].init.levelText, data);
 				consoleCacheDump();
 				break;
 			case "exhausted":
 				consolePrint("Level "+data.level+": Did not find more solutions after "+data.iterations+" iterations");
 				break;
+			case "hintInsufficient":
+				consolePrint("Level "+data.level+": Hint did not solve level on its own.");
+				break;
 			default:
 				break;
 		}
+	}
+	
+	function recordSolution(ruleText, levelText, data) {
+		var level = data.level;
+		var soln = data.solution;
+		seenSolutions[level] = {
+			ruleText:ruleText,
+			levelText:levelText,
+			prefixes:soln.prefixes,
+			steps:soln.prefixes.map(prefixToSolutionSteps),
+			iteration:data.iteration,
+			f:soln.f, g:soln.g, h:soln.h
+		};
+		return seenSolutions[level];
 	}
 
 	var workers = [];
@@ -177,6 +205,7 @@ var Analyzer = (function() {
 		workerLookup[wtype][key] = w;
 		w.workerType = wtype;
 		w.key = key;
+		w.init = init;
 
 		w.onmessage = function(msg) {
 			var type = msg.data.type;

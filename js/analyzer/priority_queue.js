@@ -32,6 +32,13 @@ exports.PriorityQueue = function PriorityQueue(compare, queue) {
     }
     return t;
   }
+  
+  this.removeItem = function removeItem(it) {
+  	var idx = queue.indexOf(it);
+	if(idx == -1) { return; }
+	remove(idx);
+	return it;
+  }
 
 	this.peek = function peek() {
 		return queue[0];

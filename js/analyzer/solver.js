@@ -72,9 +72,55 @@ var Solver = (function() {
 		q = new priority_queue.PriorityQueue(function(a,b) { return a.f-b.f; });
 		root = createOrFindNode(null,WAIT);
 		enqueueNode(root);
+		
+		if(config.hint) {
+			var hint = config.hint;
+			// log("Has hint "+hint.prefixes[0].join(","));
+			var node = root;
+			var newNodes = new Array(ACTIONS.length);
+			for(var ai=0; ai < hint.prefixes[0].length; ai++) {
+				if(q.length==0) {
+					log("Got a win earlier than expected");
+					break;
+				}
+				// log("expanding "+node.id+" due to hint");
+				q.removeItem(node);
+				remove(node,open);
+				insert(node,closed);
+				expand(0,node,newNodes);
+				//of the last set of new nodes, find the one whose predecessor-action pair is the previous node and the current action
+				for(var ni=0; ni < newNodes.length; ni++) {
+					if(!newNodes[ni]) { continue; }
+					if(hasPredecessor(newNodes[ni],node,hint.prefixes[0][ai])) {
+						node = newNodes[ni];
+						// log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
+						break;
+					}
+				}
+			}
+			if(q.length != 0) {
+				REPLY_FN("hintInsufficient", {
+					level:LEVEL,
+					hint:config.hint,
+					queueLength:q.length,
+					nodeCount:nodeId,
+					minG:(q.peek() ? q.peek().g : -1),
+					minH:(q.peek() ? q.peek().h : -1)
+				});
+			}
+		}
 
 		Solver.continueSearch(0);
 	};
+	
+	function hasPredecessor(node,pred,predAction) {
+		for(var pi = 0; pi < node.predecessors.length; pi++) {
+			if(equiv(node.predecessors[pi].predecessor,pred) && node.predecessors[pi].action == predAction) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	module.continueSearch = function(continuation) {
 		testsAutoAdvanceLevel = false;
@@ -83,6 +129,7 @@ var Solver = (function() {
 		if(iters < ITER_MAX && q.length > 0) {
 			REPLY_FN("busy", {
 				continuation:iters,
+				level:LEVEL,
 				queueLength:q.length,
 				nodeCount:nodeId,
 				minG:(q.peek() ? q.peek().g : -1),
@@ -113,47 +160,60 @@ var Solver = (function() {
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
 			var node = q.shift();
+			//because of weirdness with hints and our inability to delete items from the queue, our q might have noise in it.
+			if(member(node,closed)) { warn("found a closed node "+node.id); continue; }
 			//log("Dat:"+JSON.stringify(node.backup));
 			exactRemove(node,open);
 			exactInsert(node,closed);
-			//for each action valid in the game:
-			for(var ai = 0; ai < ACTIONS.length; ai++) {
-				var action = ACTIONS[ai];
-				//switch to this state, perform action, createOrFindNode()
-				switchToSearchState(node);
-				processInput(action);
-				var currentNode = createOrFindNode(node,action);
-				//log("Found "+currentNode.id+" by "+node.id +":"+action);
-				//if this is winning, report a win
-				if(winning) {
-					//log("WIN");
-					postSolution(currentNode, iter);
-					
-					if(FIRST_SOLN_ONLY) {
-						q = new priority_queue.PriorityQueue();
-						open = initSet();
-						closed = initSet();
-						return iter;
+			expand(iter,node,null);
+		}
+		return iter;
+	}
+	function expand(iter,node,track) {
+		//for each action valid in the game:
+		for(var ai = 0; ai < ACTIONS.length; ai++) {
+			var action = ACTIONS[ai];
+			//switch to this state, perform action, createOrFindNode()
+			switchToSearchState(node);
+			processInput(action);
+			var currentNode = createOrFindNode(node,action);
+			if(track) {
+				track[ai] = currentNode;
+			}
+			//log("Found "+currentNode.id+" by "+node.id +":"+action);
+			//if this is winning, report a win
+			if(winning) {
+				//log("WIN");
+				postSolution(currentNode, iter);
+				
+				if(FIRST_SOLN_ONLY) {
+					q = new priority_queue.PriorityQueue();
+					open = initSet();
+					closed = initSet();
+					if(track) {
+						for(var aj = ai; aj < ACTIONS.length; aj++) {
+							track[aj] = null;
+						}
 					}
-					
-					//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!
-					addEventualSolution(currentNode.predecessors,currentNode);
-				} else if(currentNode != root &&
-					      currentNode.predecessors.length == 1) {
-					//log("enQ "+currentNode.id);
-					enqueueNode(currentNode);
-				} else if(currentNode.eventualSolutions.length) {
-					//log("Eventual win");
-					for(var esi in currentNode.eventualSolutions) {
-						var es = currentNode.eventualSolutions[esi];
-						postSolution(es,iter);
-						addEventualSolution([{action:action, predecessor:node}],es);
-					}
+					return;
+				}
+				
+				//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!
+				addEventualSolution(currentNode.predecessors,currentNode);
+			} else if(currentNode != root &&
+				      currentNode.predecessors.length == 1) {
+				//log("enQ "+currentNode.id);
+				enqueueNode(currentNode);
+			} else if(currentNode.eventualSolutions.length) {
+				//log("Eventual win");
+				for(var esi in currentNode.eventualSolutions) {
+					var es = currentNode.eventualSolutions[esi];
+					postSolution(es,iter);
+					addEventualSolution([{action:action, predecessor:node}],es);
 				}
 			}
 		}
-		return iter;
-	};
+	}
 
 	function addEventualSolution(nodePreds,s) {
 		if(nodePreds.length == 0) { return; }
@@ -455,6 +515,7 @@ var Solver = (function() {
 	}
 
 	function equiv(n1,n2) {
+		if(n1 == n2) { return true; }
 		if(n1.winning != n2.winning) { return false; }
 		var n1BakObjs = null;
 		if(n1.backup) {

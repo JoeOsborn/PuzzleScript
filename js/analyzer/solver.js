@@ -73,7 +73,7 @@ var Solver = (function() {
 		root = createOrFindNode(null,WAIT);
 		enqueueNode(root);
 		
-		if(config.hint) {
+		if(config.hint && config.hint.prefixes && config.hint.prefixes.length) {
 			var hint = config.hint;
 			// log("Has hint "+hint.prefixes[0].join(","));
 			var node = root;

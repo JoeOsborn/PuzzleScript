@@ -12,6 +12,9 @@ if(!this.hasOwnProperty("compileAndAnalyze") ||
 	compile = compileAndAnalyze;
 }
 
+//TODO: show visual feedback in console or something when solvers are active.
+//TODO: indicate search status in editor rather than in console.
+
 var Analyzer = (function() {
 	var module = {};
 	var lastRules = "";
@@ -31,6 +34,10 @@ var Analyzer = (function() {
 	//Launch a web worker to do analysis without blocking the UI.
 	module.analyze = function(command,text,randomseed) {
 		//by this time, compile has already been called.
+		if(errorCount > 0) {
+			consolePrint("Analysis cancelled due to errors.");
+			return;
+		}
 		if (!text){
 			var code = window.form1.code;
 			var editor = code.editorreference;
@@ -43,8 +50,9 @@ var Analyzer = (function() {
 			//TODO: if this is a different game, nuke seenSolutions
 			//kill stale workers.
 			//TODO: only kill them if their levels' texts have changed or if the rules have changed.
+			levelQueue = [];
 			for(var i = 0; i < solvers.length; i++) {
-				killWorker("solve", solvers[i].id);
+				killWorker("solve", solvers[i].key);
 			}
 			levelQueue = createLevelQueue(true, [curlevel]);
 			tickLevelQueue(null);
@@ -54,42 +62,79 @@ var Analyzer = (function() {
 		}
 	}
 	
+	function rulePart(rules) {
+		return rules.substring(0,rules.search(/\bLEVELS\b/));
+	}
+	
+	function equivLevels(l1, l2) {
+		if(l1 == l2) { return true; }
+		if(!l1 && l2) { return false; }
+		if(l1 && !l2) { return false; }
+		if(l1.objects && !l2.objects) { return false; }
+		if(!l1.objects && l2.objects) { return false; }
+		if(!l1.objects && !l2.objects) { return l1.message == l2.message; }
+		if(l1.width != l2.width || l1.height != l2.height || l1.objects.length != l2.objects.length) { return false; }
+		for(var i=0; i < l1.objects.length; i++) {
+			if(l1.objects[i] != l2.objects[i]) { 
+				return false; 
+			}
+		}
+		return true;
+	}
+	
+	function equivRules(oldRules, newRules) {
+		return oldRules == newRules;
+	}
+	
+	function enqueueLevel(q,lev,force) {
+		var prevLevel = seenSolutions[lev] ? seenSolutions[lev].level : null;
+		var prevRules = seenSolutions[lev] ? seenSolutions[lev].ruleText : null;
+		if(equivLevels(prevLevel, state.levels[lev]) && equivRules(rulePart(prevRules), rulePart(gameRules))) {
+		  consolePrint("Level "+lev+" seems unchanged");
+		  return;
+		}
+		q.push(lev);
+	}
+	
 	function createLevelQueue(force, prioritize) {
-		//TODO: only add levels that have changed since last solution (unless the rules themselves have changed)
-		//TODO: log a visible console message if the hint does not solve things by itself. in any event, use the last found solution as a default hint.
 		//TODO: permit "clearing" default hints.
 		var q = [];
 		for(var i = 0; i < prioritize.length; i++) {
 			if(state.levels[prioritize[i]] && !state.levels[prioritize[i]].message) {
-				q.push(prioritize[i]);
+				enqueueLevel(q,prioritize[i],force);
 			}
 		}
 		for(i = 0; i < state.levels.length; i++) {
 			if(q.indexOf(i) == -1 && state.levels[i] && !state.levels[i].message) {
-				q.push(i);
+				enqueueLevel(q,i,force);
 			}
 		}
 		//assert(every_element_unique(q))
 		return q;
 	}
 	
+	function levelHint(lev) {
+		return seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev] : null
+	}
+	
 	//TODO: try running two or three workers at once.
 	function tickLevelQueue(wkr) {
 		if(!levelQueue.length) { return; }
 		var lev = levelQueue.shift();
+		var level = state.levels[lev];
 		if(USE_WORKERS) {
 			startWorker("solve", lev, {
 				rules:gameRules,
 				level:lev,
 				//seed:randomseed,
-				hint:seenSolutions[lev],
+				hint:levelHint(lev),
 				verbose:true
 			}, handleSolver, tickLevelQueue);
 		} else {
 			Solver.startSearch({
 				rules:gameRules,
 				level:lev,
-				hint:seenSolutions[lev],
+				hint:levelHint(lev),
 				//seed:randomseed,
 				verbose:true,
 				replyFn:function(type,msg) {
@@ -118,7 +163,6 @@ var Analyzer = (function() {
 		);
 	}
 	
-	//TODO: save solutions per-level (of course, nullify them if the game changes!)
 	function handleSolver(id,type,data) {
 		switch(type) {
 			case "solution":
@@ -131,6 +175,9 @@ var Analyzer = (function() {
 				break;
 			case "exhausted":
 				consolePrint("Level "+data.level+": Did not find more solutions after "+data.iterations+" iterations");
+				if(!seenSolutions[data.level]) {
+					recordFailure(workers[id].init.rules, workers[id].init.levelText, data);
+				}
 				break;
 			case "hintInsufficient":
 				consolePrint("Level "+data.level+": Hint did not solve level on its own.");
@@ -146,10 +193,25 @@ var Analyzer = (function() {
 		seenSolutions[level] = {
 			ruleText:ruleText,
 			levelText:levelText,
+			level:state.levels[level],
 			prefixes:soln.prefixes,
 			steps:soln.prefixes.map(prefixToSolutionSteps),
 			iteration:data.iteration,
 			f:soln.f, g:soln.g, h:soln.h
+		};
+		return seenSolutions[level];
+	}
+
+	function recordFailure(ruleText, levelText, data) {
+		var level = data.level;
+		seenSolutions[level] = {
+			ruleText:ruleText,
+			levelText:levelText,
+			level:state.levels[level],
+			prefixes:[],
+			steps:[],
+			iteration:data.iteration,
+			f:-1, g:-1, h:-1
 		};
 		return seenSolutions[level];
 	}
@@ -161,6 +223,7 @@ var Analyzer = (function() {
 	};
 
 	function killWorker(type,key) {
+		console.log("KILL: "+type+" . "+key);
 		var w = getWorker(type,key,false);
 		if(!w) { return null; }
 		w.terminate();
@@ -189,7 +252,11 @@ var Analyzer = (function() {
 		if(!workerLookup[type]) {
 			return [];
 		}
-		return workerLookup[type];
+		var result = [];
+		for(var k in workerLookup[type]) {
+			result.push(workerLookup[type][k]);
+		}
+		return result;
 	}
 	
 	function startWorker(wtype, key, init, handle, whenFinished) {

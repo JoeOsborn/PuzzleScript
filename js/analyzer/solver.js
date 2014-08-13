@@ -42,8 +42,11 @@ var Solver = (function() {
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
 	
 	var FIRST_SOLN_ONLY = true;
+	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
+	//Longer -> higher G_DISCOUNT
+	//For shortish games, maybe even set skip_h=true
 	var SKIP_H = false;
-	var G_DISCOUNT = 0.1;
+	var G_DISCOUNT = 0.5;
 
 	var INIT_LEVEL;
 

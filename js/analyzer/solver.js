@@ -33,8 +33,8 @@ var Solver = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 
-	var ITERS_PER_CONTINUATION = 2000;
-	var ITER_MAX = 60000;
+	var ITERS_PER_CONTINUATION = 5000;
+	var ITER_MAX = 100000;
 
 	var VERBOSE = false;
 	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;
@@ -192,6 +192,7 @@ var Solver = (function() {
 			//log("Iter "+iter);
 			var node = q.shift();
 			//because of weirdness with hints and our inability to delete items from the queue, our q might have noise in it.
+			if(node.visited) { continue; }
 			if(member(node,closed)) { warn("found a closed node "+node.id); continue; }
 			//log("Dat:"+JSON.stringify(node.backup));
 			exactRemove(node,open);
@@ -201,6 +202,7 @@ var Solver = (function() {
 		return iter;
 	}
 	function expand(iter,node,track) {
+		node.visited = true;
 		//for each action valid in the game:
 		for(var ai = 0; ai < ACTIONS.length; ai++) {
 			var action = ACTIONS[ai];
@@ -332,6 +334,7 @@ var Solver = (function() {
 
 	var tempNode = {
 		id:-1,
+		visited:false,
 		backup:null,
 		predecessors:[],
 		firstPrefix:[],
@@ -347,28 +350,40 @@ var Solver = (function() {
 		tempCentroids = findCentroids(tempCentroids);
 		tempNode.winning = winning;
 		tempNode.objectCentroids = tempCentroids;
-		var existingN = member(tempNode,closed) || member(tempNode,open);
+		var existingInClosed = member(tempNode,closed);
+		var existingInOpen = existingInClosed ? null : member(tempNode,open);
+		var existingN = existingInClosed || existingInOpen;
+		var g = pred ? pred.g+1*G_DISCOUNT : 0;
 		if(existingN) {
 			if(pred) {
 				//pred.successors[action] = existingN;
 				//log("B add "+pred.id+":"+action+" to "+existingN.id);
 				existingN.predecessors.push({action:action, predecessor:pred});
 			}
-			/* // Doing this is pointless, since we don't want to re-sort the q.
 			if(g < existingN.g) {
 				existingN.g = g;
+				//no need to recalculate H, since H is independent of path
+				// if(existingInOpen) {
+				// 	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
+				// }
+				existingN.f = existingN.g + existingN.h;
+				if(existingInOpen) {
+					//let's just live with duplicate items!
+					q.push(existingN);
+					//existingN won't have any successors, since it's in the open set.
+					//so there's no need to worry about updating them.
+				} else {
+					//MAYBE: if existingInClosed, also update successors in the closed set?
+					//Won't help with search at all...
+				}
 			}
-			if(h < existingN.h) {
-				existingN.h = h;
-			}
-			existingN.f = existingN.g + existingN.h;*/
 			return existingN;
 		}
 		//actually make a node data structure
 		var h = calculateH();
-		var g = pred ? pred.g+1*G_DISCOUNT : 0;
 		var n = {
 			id:nodeId,
+			visited:false,
 			backup:backupLevel(),
 			predecessors:[],
 			firstPrefix:[],
@@ -403,82 +418,80 @@ var Solver = (function() {
 
 	function calculateH() {
 		var h = 0;
-		if(SKIP_H) { return h; }
-		if (state.winconditions.length>0)  {
-			for (var wcIndex=0;wcIndex<state.winconditions.length;wcIndex++) {
-				var wincondition = state.winconditions[wcIndex];
-				var filter1 = wincondition[1]; //"X"; if univ, will always pass
-				var filter2 = wincondition[2]; //"Y"; if empty, will always pass
-				switch(wincondition[0]) {
-					case -1://NO
-						{
-							//1 for each x on a y
-							for (var i=0;i<level.n_tiles;i++) {
-								var cell = level.getCellInto(i,_oA);
-								if ((!filter1.bitsClearInArray(cell.data)) &&
-										(!filter2.bitsClearInArray(cell.data)) ) {
-									h++;
-								}
+		if(SKIP_H || state.winconditions.length==0) { return h; }
+		for (var wcIndex=0;wcIndex<state.winconditions.length;wcIndex++) {
+			var wincondition = state.winconditions[wcIndex];
+			var filter1 = wincondition[1]; //"X"; if univ, will always pass
+			var filter2 = wincondition[2]; //"Y"; if empty, will always pass
+			switch(wincondition[0]) {
+				case -1://NO
+					{
+						//1 for each x on a y
+						for (var i=0;i<level.n_tiles;i++) {
+							var cell = level.getCellInto(i,_oA);
+							if ((!filter1.bitsClearInArray(cell.data)) &&
+									(!filter2.bitsClearInArray(cell.data)) ) {
+								h++;
 							}
-							break;
 						}
-					case 0://SOME
-						{
-							//min distance between any X and its nearest Y
-							var minDist = Infinity;
-							var anyXs = false;
-							for (var i=0;i<level.n_tiles;i++) {
-								var cell = level.getCellInto(i,_oA);
-								if ( (!filter1.bitsClearInArray(cell.data)) ) {
-									anyXs = true;
-									var nearest = findNearest(filter2,i);
-									//no Y!
+						break;
+					}
+				case 0://SOME
+					{
+						//min distance between any X and its nearest Y
+						var minDist = Infinity;
+						var anyXs = false;
+						for (var i=0;i<level.n_tiles;i++) {
+							var cell = level.getCellInto(i,_oA);
+							if ( (!filter1.bitsClearInArray(cell.data)) ) {
+								anyXs = true;
+								var nearest = findNearest(filter2,i);
+								//no Y!
+								//it's not clear what a reasonable value would be.
+								//we'll be optimistic in order to try and stay admissible,
+								//and hope that the next turn will produce a Y.
+								//Put another way, we have "an unsatisfied X".
+								if(nearest == -1) {
+									minDist = min(minDist,1);
+								}
+								minDist = min(minDist, distance(nearest,i));
+								//already an X on a Y! Just use 0.
+								if(minDist == 0) { break; }
+							}
+						}
+						h += anyXs ? minDist : 1;
+						break;
+					}
+				case 1://ALL
+					{
+						//sum of distances between all xs and their nearest ys
+						for (var i=0;i<level.n_tiles;i++) {
+							var cell = level.getCellInto(i,_oA);
+							//an X on a non-Y. where is the nearest Y?
+							if ((!filter1.bitsClearInArray(cell.data)) &&
+									(filter2.bitsClearInArray(cell.data))) {
+								var nearest = findNearest(filter2,i);
+								if(nearest != -1) {
+									//there's a y somewhere.
+									//note that this will map multiple xs onto a single y.
+									//this difference could be normalized, but then it would
+									//be in different units from g, which are "turns".
+									h += distance(nearest, i);
+								} else {
+									//there's no y!
 									//it's not clear what a reasonable value would be.
 									//we'll be optimistic in order to try and stay admissible,
 									//and hope that the next turn will produce a Y.
 									//Put another way, we have "an unsatisfied X".
-									if(nearest == -1) {
-										minDist = min(minDist,1);
-									}
-									minDist = min(minDist, distance(nearest,i));
-									//already an X on a Y! Just use 0.
-									if(minDist == 0) { break; }
+									h += 1;
 								}
 							}
-							h += anyXs ? minDist : 1;
-							break;
 						}
-					case 1://ALL
-						{
-							//sum of distances between all xs and their nearest ys
-							for (var i=0;i<level.n_tiles;i++) {
-								var cell = level.getCellInto(i,_oA);
-								//an X on a non-Y. where is the nearest Y?
-								if ((!filter1.bitsClearInArray(cell.data)) &&
-										(filter2.bitsClearInArray(cell.data))) {
-									var nearest = findNearest(filter2,i);
-									if(nearest != -1) {
-										//there's a y somewhere.
-										//note that this will map multiple xs onto a single y.
-										//this difference could be normalized, but then it would
-										//be in different units from g, which are "turns".
-										h += distance(nearest, i);
-									} else {
-										//there's no y!
-										//it's not clear what a reasonable value would be.
-										//we'll be optimistic in order to try and stay admissible,
-										//and hope that the next turn will produce a Y.
-										//Put another way, we have "an unsatisfied X".
-										h += 1;
-									}
-								}
-							}
-							break;
-						}
-				}
+						break;
+					}
 			}
 		}
-		return h;
+		return h/state.winconditions.length;
 	}
 	function distance(i,j) {
 		var ix = floor(i / level.height);

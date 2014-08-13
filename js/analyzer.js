@@ -166,7 +166,7 @@ var Analyzer = (function() {
 	function handleSolver(id,type,data) {
 		switch(type) {
 			case "solution":
-				consolePrint("Level "+data.level+": Found solution #"+1+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+":<br/>&nbsp;"+data.solution.prefixes.map(function(p) { return prefixToSolutionSteps(p).join(","); }).join("<br/>&nbsp;"));
+				consolePrint("Level "+data.level+": Found solution #"+1+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+" ("+data.time+" seconds):<br/>&nbsp;"+data.solution.prefixes.map(function(p) { return prefixToSolutionSteps(p).join(","); }).join("<br/>&nbsp;"));
 				if(data.iteration == 0) {
 					consolePrint("&nbsp;(Thanks to hint from last time)");
 				}
@@ -174,13 +174,13 @@ var Analyzer = (function() {
 				consoleCacheDump();
 				break;
 			case "exhausted":
-				consolePrint("Level "+data.level+": Did not find more solutions after "+data.iterations+" iterations");
+				consolePrint("Level "+data.level+": Did not find more solutions after "+data.iterations+" iterations ("+data.time+" seconds)");
 				if(!seenSolutions[data.level]) {
 					recordFailure(workers[id].init.rules, workers[id].init.levelText, data);
 				}
 				break;
 			case "hintInsufficient":
-				consolePrint("Level "+data.level+": Hint did not solve level on its own.");
+				consolePrint("Level "+data.level+": Hint did not solve level on its own ("+data.time+" seconds)");
 				break;
 			default:
 				break;

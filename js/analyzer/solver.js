@@ -2,6 +2,27 @@
 
 var scope = self;
 
+// performance.now polyfill © Paul Irish
+// https://gist.github.com/paulirish/5438650
+// relies on Date.now() which has been supported everywhere modern for years.
+// as Safari 6 doesn't have support for NavigationTiming, we use a Date.now() timestamp for relative values
+// if you want values similar to what you'd get with real perf.now, place this towards the head of the page
+// but in reality, you're just getting the delta between now() calls, so it's not terribly important where it's placed
+// prepare base perf object
+if (!performance || typeof performance === 'undefined') {
+    performance = {};
+}
+
+if (!performance.now){
+  var nowOffset = Date.now();
+  if (performance.timing && performance.timing.navigationStart){
+    nowOffset = performance.timing.navigationStart
+  }
+  performance.now = function now(){
+    return Date.now() - nowOffset;
+  }
+}
+
 var Solver = (function() {
 	var module = {};
 
@@ -13,7 +34,7 @@ var Solver = (function() {
 	var ACTION = 4;
 
 	var ITERS_PER_CONTINUATION = 2000;
-	var ITER_MAX = 20000;
+	var ITER_MAX = 60000;
 
 	var VERBOSE = false;
 	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;
@@ -27,6 +48,8 @@ var Solver = (function() {
 	var INIT_LEVEL;
 
 	var ACTIONS;
+	
+	var START_TIME = 0;
 
 	var nodeId=0;
 	var open, closed, q;
@@ -45,6 +68,7 @@ var Solver = (function() {
 		if(config.replyFn) {
 			REPLY_FN = config.replyFn;
 		}
+		START_TIME = performance.now();
 
 		if(scope.hasOwnProperty("justCompile")) {
 			justCompile(["loadLevel", LEVEL], RULES, SEED);
@@ -54,7 +78,7 @@ var Solver = (function() {
 		INIT_LEVEL = backupLevel();
 
 		if (!state.levels[LEVEL] || state.levels[LEVEL].message) {
-			REPLY_FN("exhausted", {level:LEVEL, iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1});
+			REPLY_FN("exhausted", {level:LEVEL, iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, time:timeSinceStart()});
 			REPLY_FN("stopped");
 			return;
 		}
@@ -105,13 +129,18 @@ var Solver = (function() {
 					queueLength:q.length,
 					nodeCount:nodeId,
 					minG:(q.peek() ? q.peek().g : -1),
-					minH:(q.peek() ? q.peek().h : -1)
+					minH:(q.peek() ? q.peek().h : -1),
+					time:timeSinceStart()
 				});
 			}
 		}
 
 		Solver.continueSearch(0);
 	};
+	
+	function timeSinceStart() {
+		return (performance.now()-START_TIME)/1000.0;
+	}
 	
 	function hasPredecessor(node,pred,predAction) {
 		for(var pi = 0; pi < node.predecessors.length; pi++) {
@@ -133,7 +162,8 @@ var Solver = (function() {
 				queueLength:q.length,
 				nodeCount:nodeId,
 				minG:(q.peek() ? q.peek().g : -1),
-				minH:(q.peek() ? q.peek().h : -1)
+				minH:(q.peek() ? q.peek().h : -1),
+				time:timeSinceStart()
 			});
 		} else {
 			restartTarget=INIT_LEVEL;
@@ -145,7 +175,8 @@ var Solver = (function() {
 				queueLength:q.length,
 				nodeCount:nodeId,
 				minG:(q.peek() ? q.peek().g : -1),
-				minH:(q.peek() ? q.peek().h : -1)
+				minH:(q.peek() ? q.peek().h : -1),
+				time:timeSinceStart()
 			});
 			REPLY_FN("stopped");
 		}
@@ -227,6 +258,7 @@ var Solver = (function() {
 		}
 	}
 
+	//FIXME: crashes on level 6 (0-indexed) of Constellation Z. Maybe is infinite looping there.
 	function prefixes(n) {
 		//log("entering "+n.id);
 		var visited = {};
@@ -258,14 +290,19 @@ var Solver = (function() {
 	}
 
 	function postSolution(currentNode, iter) {
-		REPLY_FN("solution", {level:LEVEL, solution:{
-			id:currentNode.id,
-			backup:currentNode.backup,
-			g:currentNode.g,
-			h:currentNode.h,
-			f:currentNode.f,
-			prefixes:prefixes(currentNode)
-		}, iteration:iter});
+		REPLY_FN("solution", {
+			level:LEVEL, 
+			solution:{
+				id:currentNode.id,
+				backup:currentNode.backup,
+				g:currentNode.g,
+				h:currentNode.h,
+				f:currentNode.f,
+				prefixes:FIRST_SOLN_ONLY ? [currentNode.firstPrefix] : prefixes(currentNode)
+			}, 
+			iteration:iter,
+			time:timeSinceStart()
+		});
 	};
 
 	var arCounts, tempCentroids;
@@ -297,6 +334,7 @@ var Solver = (function() {
 		id:-1,
 		backup:null,
 		predecessors:[],
+		firstPrefix:[],
 		//successors:[],
 		winning:false,
 		eventualSolutions:[],
@@ -333,6 +371,7 @@ var Solver = (function() {
 			id:nodeId,
 			backup:backupLevel(),
 			predecessors:[],
+			firstPrefix:[],
 			//successors:[],
 			winning:winning,
 			eventualSolutions:[],
@@ -344,6 +383,7 @@ var Solver = (function() {
 		if(pred) {
 			//log("A add "+pred.id+":"+action+" to "+n.id);
 			n.predecessors.push({action:action, predecessor:pred});
+			n.firstPrefix = pred.firstPrefix.concat([action]);
 		}
 		return n;
 	}

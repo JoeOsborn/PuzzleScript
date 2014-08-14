@@ -1,0 +1,11 @@
+.line-solved {
+    background: rgb(28, 109, 28) !important;
+}
+
+.line-unsolved {
+    background: rgb(106, 114, 17) !important;
+}
+
+.line-unsolvable {
+    background: rgb(163, 55, 55) !important;
+}

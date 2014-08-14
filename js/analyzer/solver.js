@@ -34,7 +34,7 @@ var Solver = (function() {
 	var ACTION = 4;
 
 	var ITERS_PER_CONTINUATION = 5000;
-	var ITER_MAX = 100000;
+	var ITER_MAX = 50000;
 
 	var VERBOSE = false;
 	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;

@@ -12,6 +12,9 @@ if(!this.hasOwnProperty("compileAndAnalyze") ||
 	compile = compileAndAnalyze;
 }
 
+var code = window.form1.code;
+var editor = code ? code.editorreference : null;
+
 //TODO: show visual feedback in console or something when solvers are active.
 //TODO: indicate search status in editor rather than in console.
 
@@ -30,6 +33,17 @@ var Analyzer = (function() {
 	INPUT_MAPPING[2]="DOWN";
 	INPUT_MAPPING[3]="RIGHT";
 	INPUT_MAPPING[4]="ACT";
+	
+	var lineHighlights = {};
+	var solvedClass = "line-solved";
+	var unsolvedClass = "line-unsolved";
+	var unsolvableClass = "line-unsolvable";
+	
+	var workers = [];
+	var workerLookup = {};
+	var workerScripts = {
+		"solve": "js/analyzer/worker_solve.js"
+	};
 
 	//Launch a web worker to do analysis without blocking the UI.
 	module.analyze = function(command,text,randomseed) {
@@ -38,9 +52,7 @@ var Analyzer = (function() {
 			consolePrint("Analysis cancelled due to errors.");
 			return;
 		}
-		if (!text){
-			var code = window.form1.code;
-			var editor = code.editorreference;
+		if(!text && editor) {
 			text = editor.getValue()+"\n";
 		}
 		gameRules = text;
@@ -54,11 +66,41 @@ var Analyzer = (function() {
 			for(var i = 0; i < solvers.length; i++) {
 				killWorker("solve", solvers[i].key);
 			}
-			levelQueue = createLevelQueue(true, [curlevel]);
+			levelQueue = createLevelQueue(true, curlevel !== undefined && curlevel > 0 ? [curlevel] : []);
+			consolePrint("Analyze levels:"+JSON.stringify(levelQueue));
 			tickLevelQueue(null);
 			lastRules = gameRules;
 		} else {
 			consolePrint("Rules are unchanged. Skipping analysis.");
+		}
+	}
+	
+	function nextEmptyLine(l) {
+		var str = "";
+		do {
+			l++;
+			str = editor.getLine(l);
+		} while(str && str.trim() != "");
+		return l;
+	}
+	
+	function updateLevelHighlights() {
+		for(var l in lineHighlights) {
+			editor.removeLineClass(l, "background", solvedClass);
+			editor.removeLineClass(l, "background", unsolvableClass);
+			editor.removeLineClass(l, "background", unsolvedClass);
+		}
+		for(var i=0; i < state.levels.length; i++) {
+			if(seenSolutions[i]) {
+				var upTo = nextEmptyLine(state.levels[i].lineNumber);
+				var solClass = seenSolutions[i].prefixes && seenSolutions[i].prefixes.length ? solvedClass :
+					(seenSolutions[i].exhaustive ? unsolvableClass : unsolvedClass);
+				//console.log("highlight "+state.levels[i].lineNumber+".."+upTo+" with "+solClass);
+				for(l = state.levels[i].lineNumber-1; l < upTo; l++) {
+					editor.addLineClass(l, "background", solClass);
+					lineHighlights[l] = solClass;
+				}
+			}
 		}
 	}
 	
@@ -187,6 +229,9 @@ var Analyzer = (function() {
 		}
 	}
 	
+	//These two functions should add/remove overlays I think. Let the overlay look at seenSolutions[...]
+	//I think "one overlay that handles all the levels" is fine.
+	//Alternately, defineOption will do the trick for a minor mode...
 	function recordSolution(ruleText, levelText, data) {
 		var level = data.level;
 		var soln = data.solution;
@@ -197,11 +242,14 @@ var Analyzer = (function() {
 			prefixes:soln.prefixes,
 			steps:soln.prefixes.map(prefixToSolutionSteps),
 			iteration:data.iteration,
+			exhaustive:data.queueLength == 0,
 			f:soln.f, g:soln.g, h:soln.h
 		};
+		updateLevelHighlights();
 		return seenSolutions[level];
 	}
 
+	//It's definitely unsolvable if data.queueLength == 0.
 	function recordFailure(ruleText, levelText, data) {
 		var level = data.level;
 		seenSolutions[level] = {
@@ -211,16 +259,12 @@ var Analyzer = (function() {
 			prefixes:[],
 			steps:[],
 			iteration:data.iteration,
+			exhaustive:data.queueLength == 0,
 			f:-1, g:-1, h:-1
 		};
+		updateLevelHighlights();
 		return seenSolutions[level];
 	}
-
-	var workers = [];
-	var workerLookup = {};
-	var workerScripts = {
-		"solve": "js/analyzer/worker_solve.js"
-	};
 
 	function killWorker(type,key) {
 		console.log("KILL: "+type+" . "+key);
@@ -313,7 +357,7 @@ var Analyzer = (function() {
 
 		return w;
 	};
-
+	
 	return module;
 })();
 

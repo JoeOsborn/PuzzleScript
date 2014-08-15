@@ -85,6 +85,11 @@ var Analyzer = (function() {
 		}
 	}
 	
+	module.dumpHint = function dumpHint() {
+		var input = prefixToSolutionSteps(inputHistory);
+		consolePrint("<br/>Paste this just after the level definition:<br/>(@HINT:"+input.join(" ")+")<br/>",true);
+	};
+	
 	function nextEmptyLine(l) {
 		var str = "";
 		do {

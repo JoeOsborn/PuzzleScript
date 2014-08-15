@@ -35,7 +35,7 @@ function convertLevelToString() {
 
 function dumpTestCase() {
 	var levelDat = compiledText;
-	var input = inputHistory.concat([]);
+	var input = inputHistory.slice();
 	var outputDat = convertLevelToString();
 
 	var resultarray = [levelDat,input,outputDat,curlevel,loadedLevelSeed];

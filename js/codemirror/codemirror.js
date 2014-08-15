@@ -4400,7 +4400,7 @@
     var nstate = {};
     for (var n in state) {
       var val = state[n];
-      if (val instanceof Array) val = val.concat([]);
+      if (val instanceof Array) val = val.slice();
       nstate[n] = val;
     }
     return nstate;

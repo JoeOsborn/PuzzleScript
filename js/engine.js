@@ -811,16 +811,14 @@ function DoUndo(force) {
 	}
 }
 
-function getPlayerPositions() {
-    var result=[];
+function getPlayerPositions(positions) {
     var playerMask = state.playerMask;
     for (i=0;i<level.n_tiles;i++) {
         level.getCellInto(i,_o11);
         if (playerMask.anyBitsInCommon(_o11)) {
-            result.push(i);
+            positions.push(i);
         }
     }
-    return result;
 }
 
 function getLayersOfMask(cellMask) {
@@ -848,14 +846,14 @@ function moveEntitiesAtIndex(positionIndex, entityMask, dirMask) {
 }
 
 
-function startMovement(dir) {
+function startMovement(dir,positions) {
 	var movedany=false;
-    var playerPositions = getPlayerPositions();
+    getPlayerPositions(positions);
     for (var i=0;i<playerPositions.length;i++) {
         var playerPosIndex = playerPositions[i];
         moveEntitiesAtIndex(playerPosIndex,state.playerMask,dir);
     }
-    return playerPositions;
+    return positions;
 }
 
 var dirMasksDelta = {
@@ -1739,9 +1737,9 @@ function commitPreservationState(ruleGroupIndex) {
 		//don't need to know the tuple index
 		objects:new Int32Array(level.objects),
 		movements:new Int32Array(level.movements),
-		rigidGroupIndexMask:level.rigidGroupIndexMask.concat([]),
-		rigidMovementAppliedMask:level.rigidMovementAppliedMask.concat([]),
-		bannedGroup:level.bannedGroup.concat([])
+		rigidGroupIndexMask:level.rigidGroupIndexMask.slice(),
+		rigidMovementAppliedMask:level.rigidMovementAppliedMask.slice(),
+		bannedGroup:level.bannedGroup.slice()
 	};
 	rigidBackups[ruleGroupIndex]=propagationState;
 	return propagationState;
@@ -1751,8 +1749,8 @@ function restorePreservationState(preservationState) {
 //don't need to concat or anythign here, once something is restored it won't be used again.
 	level.objects = new Int32Array(preservationState.objects);
 	level.movements = new Int32Array(preservationState.movements);
-	level.rigidGroupIndexMask = preservationState.rigidGroupIndexMask.concat([]);
-    level.rigidMovementAppliedMask = preservationState.rigidMovementAppliedMask.concat([]);
+	level.rigidGroupIndexMask = preservationState.rigidGroupIndexMask.slice();
+    level.rigidMovementAppliedMask = preservationState.rigidMovementAppliedMask.slice();
     sfxCreateMask=new BitVec(STRIDE_OBJ);
     sfxDestroyMask=new BitVec(STRIDE_OBJ);
 //	rigidBackups = preservationState.rigidBackups;
@@ -2086,8 +2084,10 @@ function calculateRowColMasks() {
 	}
 }
 
+var playerPositions = [];
+
 /* returns a bool indicating if anything changed */
-function processInput(dir,dontCheckWin,dontModify) {
+function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 	againing = false;
 
 	if (verbose_logging) { 
@@ -2099,9 +2099,11 @@ function processInput(dir,dontCheckWin,dontModify) {
 	 	}
 	}
 
-	var bak = backupLevel();
+	var bak;
+	if(premadeBackup) { bak = premadeBackup; }
+	else { bak = backupLevel(); }
 
-	var playerPositions=[];
+	playerPositions.splice(0,playerPositions.length);
     if (dir<=4) {
     	if (dir>=0) {
 	        switch(dir){
@@ -2131,7 +2133,7 @@ function processInput(dir,dontCheckWin,dontModify) {
 	                break;
 	            }
 	        }
-	        playerPositions = startMovement(dir);
+	        startMovement(dir,playerPositions);
 		}
 
         var i=0;
@@ -2194,6 +2196,7 @@ function processInput(dir,dontCheckWin,dontModify) {
 	    			consolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
 	    			consoleCacheDump();
         		}
+				//@@cancel
         		backups.push(bak);
         		DoUndo(true);
         		return false;
@@ -2206,6 +2209,7 @@ function processInput(dir,dontCheckWin,dontModify) {
 	    		consolePrint('CANCEL command executed, cancelling turn.');
 	    		consoleCacheDump();
 			}
+			//@@cancel
     		backups.push(bak);
     		DoUndo(true);
     		return false;
@@ -2216,6 +2220,7 @@ function processInput(dir,dontCheckWin,dontModify) {
 	    		consolePrint('RESTART command executed, reverting to restart state.');
 	    		consoleCacheDump();
 			}
+			//@@restart (@@cancel)
     		backups.push(bak);
 	    	DoRestart(true);
     		return true;
@@ -2232,6 +2237,7 @@ function processInput(dir,dontCheckWin,dontModify) {
 	        		if (verbose_logging) {
 	        			consoleCacheDump();
 	        		}
+					//@@cancel-ish
 	        		backups.push(bak);
 	        		DoUndo(true);
 					return true;

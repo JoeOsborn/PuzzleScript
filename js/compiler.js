@@ -154,7 +154,7 @@ function generateExtraMembers(state) {
 	for (var n in state.objects) {
 	      if (state.objects.hasOwnProperty(n)) {
 	      	var o = state.objects[n];
-			var mask = blankMask.concat([]);
+			var mask = blankMask.slice();
 			mask[o.layer] = o.id;
 			glyphDict[n] = mask;
 		}
@@ -188,7 +188,7 @@ function generateExtraMembers(state) {
             	}
             }
             if ((!(key in glyphDict)||(glyphDict[key]===undefined))&&allVallsFound) {            
-                var mask = blankMask.concat([]);
+                var mask = blankMask.slice();
         
                 for (var j = 1; j < dat.length; j++) {
                     var n = dat[j];
@@ -419,7 +419,7 @@ function levelFromString(state,level) {
 			}
 
 			var maskint = new BitVec(STRIDE_OBJ);
-			mask = mask.concat([]);					
+			mask = mask.slice();					
 			for (var z = 0; z < o.layerCount; z++) {
 				if (mask[z]>=0) {
 					maskint.ibitset(mask[z]);
@@ -1381,7 +1381,7 @@ function rulesToMask(state) {
 			var cellrow_r = rule.rhs[j];
 			for (var k = 0; k < cellrow_l.length; k++) {
 				var cell_l = cellrow_l[k];
-				var layersUsed_l = layerTemplate.concat([]);
+				var layersUsed_l = layerTemplate.slice();
 				var objectsPresent = new BitVec(STRIDE_OBJ);
 				var objectsMissing = new BitVec(STRIDE_OBJ);
 				var anyObjectsPresent = [];
@@ -1471,7 +1471,7 @@ function rulesToMask(state) {
 				}
 
 				var cell_r = cellrow_r[k];
-				var layersUsed_r = layerTemplate.concat([]);
+				var layersUsed_r = layerTemplate.slice();
 
 				var objectsClear = new BitVec(STRIDE_OBJ);
 				var objectsSet = new BitVec(STRIDE_OBJ);

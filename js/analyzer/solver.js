@@ -34,7 +34,7 @@ var Solver = (function() {
 	var ACTION = 4;
 
 	var ITERS_PER_CONTINUATION = 5000;
-	var ITER_MAX = 200000;
+	var ITER_MAX = 100000;
 
 	var VERBOSE = false;
 	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;
@@ -243,7 +243,7 @@ var Solver = (function() {
 			var action = ACTIONS[ai];
 			//switch to this state, perform action, createOrFindNode()
 			switchToSearchState(node);
-			processInput(action);
+			processInput(action,false,false,node.backup);
 			var currentNode = createOrFindNode(node,action);
 			if(track) {
 				track[ai] = currentNode;

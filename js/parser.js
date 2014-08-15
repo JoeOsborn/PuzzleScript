@@ -193,16 +193,16 @@ var codeMirrorFn = function() {
               if (state.objects.hasOwnProperty(i)) {
                 var o = state.objects[i];
                 objectsCopy[i] = {
-                  colors: o.colors.concat([]),
+                  colors: o.colors.slice(),
                   lineNumber : o.lineNumber,
-                  spritematrix: o.spritematrix.concat([])
+                  spritematrix: o.spritematrix.slice()
                 }
               }
             }
 
             var collisionLayersCopy = [];
             for (var i = 0; i < state.collisionLayers.length; i++) {
-              collisionLayersCopy.push(state.collisionLayers[i].concat([]));
+              collisionLayersCopy.push(state.collisionLayers[i].slice());
             }
 
             var legend_synonymsCopy = [];
@@ -213,22 +213,22 @@ var codeMirrorFn = function() {
             var winConditionsCopy = [];
 
             for (var i = 0; i < state.legend_synonyms.length; i++) {
-              legend_synonymsCopy.push(state.legend_synonyms[i].concat([]));
+              legend_synonymsCopy.push(state.legend_synonyms[i].slice());
             }
             for (var i = 0; i < state.legend_aggregates.length; i++) {
-              legend_aggregatesCopy.push(state.legend_aggregates[i].concat([]));
+              legend_aggregatesCopy.push(state.legend_aggregates[i].slice());
             }
             for (var i = 0; i < state.legend_properties.length; i++) {
-              legend_propertiesCopy.push(state.legend_properties[i].concat([]));
+              legend_propertiesCopy.push(state.legend_properties[i].slice());
             }
             for (var i = 0; i < state.sounds.length; i++) {
-              soundsCopy.push(state.sounds[i].concat([]));
+              soundsCopy.push(state.sounds[i].slice());
             }
             for (var i = 0; i < state.levels.length; i++) {
-              levelsCopy.push(state.levels[i].concat([]));
+              levelsCopy.push(state.levels[i].slice());
             }
             for (var i = 0; i < state.winconditions.length; i++) {
-              winConditionsCopy.push(state.winconditions[i].concat([]));
+              winConditionsCopy.push(state.winconditions[i].slice());
             }
 
             var nstate = {
@@ -239,11 +239,11 @@ var codeMirrorFn = function() {
 
               commentLevel: state.commentLevel,
               section: state.section,
-              visitedSections: state.visitedSections.concat([]),
+              visitedSections: state.visitedSections.slice(),
 
               objects_candname: state.objects_candname,
               objects_section: state.objects_section,
-              objects_spritematrix: state.objects_spritematrix.concat([]),
+              objects_spritematrix: state.objects_spritematrix.slice(),
 
               tokenIndex: state.tokenIndex,
               legend_synonyms: legend_synonymsCopy,
@@ -252,15 +252,15 @@ var codeMirrorFn = function() {
 
               sounds: soundsCopy,
 
-              rules: state.rules.concat([]),
+              rules: state.rules.slice(),
 
-              names: state.names.concat([]),
+              names: state.names.slice(),
 
               winconditions: winConditionsCopy,
 
-              abbrevNames: state.abbrevNames.concat([]),
+              abbrevNames: state.abbrevNames.slice(),
 
-              metadata : state.metadata.concat([]),
+              metadata : state.metadata.slice(),
 
               levels: levelsCopy,
 

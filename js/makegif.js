@@ -10,7 +10,7 @@ function makeGIF() {
 
 	var gifctx = gifcanvas.getContext('2d');
 
-	var inputDat = inputHistory.concat([]);
+	var inputDat = inputHistory.slice();
 	
 
 	unitTesting=true;

@@ -46,7 +46,7 @@ var Solver = (function() {
 	//Longer -> lower value for G_DISCOUNT
 	//For shortish games, maybe even set skip_h=true
 	var SKIP_H = false;
-	var G_DISCOUNT = 0.5;
+	var G_DISCOUNT = 1.0;
 
 	var INIT_LEVEL;
 

@@ -33,6 +33,15 @@ var Analyzer = (function() {
 	INPUT_MAPPING[2]="DOWN";
 	INPUT_MAPPING[3]="RIGHT";
 	INPUT_MAPPING[4]="ACT";
+
+	var REVERSE_INPUT_MAPPING = {
+		WAIT:-1,
+		UP:0,
+		LEFT:1,
+		DOWN:2,
+		RIGHT:3,
+		ACT:4
+	};
 	
 	var lineHighlights = {};
 	var solvedClass = "line-solved";
@@ -83,6 +92,15 @@ var Analyzer = (function() {
 			str = editor.getLine(l);
 		} while(str && str.trim() != "");
 		return l;
+	}
+	
+	function nextLevelLine(lev) {
+		for(var l=lev+1; l < state.levels.length; l++) {
+			if(state.levels[l].lineNumber) {
+				return state.levels[l].lineNumber;
+			}
+		}
+		return editor.lineCount();
 	}
 	
 	function updateLevelHighlights() {
@@ -158,8 +176,31 @@ var Analyzer = (function() {
 		return q;
 	}
 	
+	function hintLinesBetween(l1, l2) {
+		var hints = [];
+		for(var l = l1; l < l2; l++) {
+			var line = editor.getLine(l).trim();
+			var match = /\(\s*@HINT:\s*((?:UP|DOWN|LEFT|RIGHT|ACTION|WAIT)(?:\s+(UP|DOWN|LEFT|RIGHT|ACTION|WAIT))*)\s*\)/i.exec(line);
+			if(match) {
+				var hint = [];
+				var moves = match[1].split(" ");
+				for(var i=0; i < moves.length; i++) {
+					if(moves[i].trim() != "") {
+						hint.push(REVERSE_INPUT_MAPPING[moves[i].toUpperCase()]);
+					}
+				}
+				hints.push(hint);
+			}
+		}
+		console.log("Using hints "+hints.map(prefixToSolutionSteps).join("<br/>&nbsp;&nbsp;"));
+		return {prefixes:hints};
+	}
+	
 	function levelHint(lev) {
-		return seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev] : null
+		var userHints = hintLinesBetween(state.levels[lev].lineNumber+1, nextLevelLine(lev));
+		var solHints = seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev] : {prefixes:[]};
+		userHints.prefixes = userHints.prefixes.concat(solHints.prefixes);
+		return userHints;
 	}
 	
 	//TODO: try running two or three workers at once.
@@ -207,6 +248,12 @@ var Analyzer = (function() {
 	function prefixToSolutionSteps(p) {
 		return p.map(
 			function(d){return INPUT_MAPPING[d];}
+		);
+	}
+
+	function solutionStepsToPrefix(p) {
+		return p.map(
+			function(d){return REVERSE_INPUT_MAPPING[d];}
 		);
 	}
 	

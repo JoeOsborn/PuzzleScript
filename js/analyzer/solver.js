@@ -34,7 +34,7 @@ var Solver = (function() {
 	var ACTION = 4;
 
 	var ITERS_PER_CONTINUATION = 5000;
-	var ITER_MAX = 50000;
+	var ITER_MAX = 200000;
 
 	var VERBOSE = false;
 	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;
@@ -43,7 +43,7 @@ var Solver = (function() {
 	
 	var FIRST_SOLN_ONLY = true;
 	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
-	//Longer -> higher G_DISCOUNT
+	//Longer -> lower value for G_DISCOUNT
 	//For shortish games, maybe even set skip_h=true
 	var SKIP_H = false;
 	var G_DISCOUNT = 0.5;
@@ -102,26 +102,28 @@ var Solver = (function() {
 		
 		if(config.hint && config.hint.prefixes && config.hint.prefixes.length) {
 			var hint = config.hint;
-			// log("Has hint "+hint.prefixes[0].join(","));
-			var node = root;
-			var newNodes = new Array(ACTIONS.length);
-			for(var ai=0; ai < hint.prefixes[0].length; ai++) {
-				if(q.length==0) {
-					log("Got a win earlier than expected");
-					break;
-				}
-				// log("expanding "+node.id+" due to hint");
-				q.removeItem(node);
-				remove(node,open);
-				insert(node,closed);
-				expand(0,node,newNodes);
-				//of the last set of new nodes, find the one whose predecessor-action pair is the previous node and the current action
-				for(var ni=0; ni < newNodes.length; ni++) {
-					if(!newNodes[ni]) { continue; }
-					if(hasPredecessor(newNodes[ni],node,hint.prefixes[0][ai])) {
-						node = newNodes[ni];
-						// log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
+			for(var hi=0; hi < hint.prefixes.length; hi++) {
+				var node = root;
+				var newNodes = new Array(ACTIONS.length);
+				for(var ai=0; ai < hint.prefixes[hi].length; ai++) {
+					if(q.length==0) {
+						log("Got a win earlier than expected");
 						break;
+					}
+					// log("expanding "+node.id+" due to hint");
+					q.removeItem(node);
+					remove(node,open);
+					insert(node,closed);
+					expand(0,node,newNodes);
+					//of the last set of new nodes, find the one whose predecessor-action pair is the previous node and the current action
+					for(var ni=0; ni < newNodes.length; ni++) {
+						if(!newNodes[ni]) { continue; }
+						if(hasPredecessor(newNodes[ni],node,hint.prefixes[hi][ai])) {
+							node = newNodes[ni];
+							node.g = node.f = 0;
+							// log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
+							break;
+						}
 					}
 				}
 			}
@@ -176,6 +178,7 @@ var Solver = (function() {
 				level:LEVEL,
 				iterations:iters,
 				queueLength:q.length,
+				kickstart:q.length > 0 ? samplePathsFromQueue(100) : [],
 				nodeCount:nodeId,
 				minG:(q.peek() ? q.peek().g : -1),
 				minH:(q.peek() ? q.peek().h : -1),
@@ -186,6 +189,35 @@ var Solver = (function() {
 		testsAutoAdvanceLevel = OLD_AUTO_ADVANCE;
 		unitTesting = OLD_TESTING;
 	};
+	
+	function samplePathsFromQueue(count) {
+		//pick up to min(20,q.length) nodes and put their firstPrefixes into a list
+		var q2 = q._queue;
+		var ret = [q2[0].firstPrefix];
+		var firstQuartile = (q2.length / 4) | 0;
+		var secondQuartile = (q2.length / 4) | 0;
+		var thirdQuartile = (q2.length / 4) | 0;
+		for(var i=1; i < q2.length && ret.length < count; i++) {
+			var rdm = Math.random();
+			if(i <= firstQuartile && rdm < 0.8) {
+				ret.push(q2[i].firstPrefix);
+			} else if(i <= secondQuartile && rdm < 0.6) {
+				ret.push(q2[i].firstPrefix);
+			} else if(i <= thirdQuartile && rdm < 0.4) {
+				ret.push(q2[i].firstPrefix);
+			} else if(rdm < 0.2) {
+				ret.push(q2[i].firstPrefix);
+			}
+		}
+		if(ret.length < count && q2.length >= count) {
+			for(i=1; i < q2.length && ret.length < count; i++) {
+				if(ret.indexOf(q2[i].firstPrefix) == -1) {
+					ret.push(q2[i].firstPrefix);
+				}
+			}
+		}
+		return ret;
+	}
 
 	function searchSome(continuation) {
 		//search a number of iterations, then return true if there is more to come
@@ -316,11 +348,11 @@ var Solver = (function() {
 		if(!arCounts || into.length != arCounts.length) {
 			arCounts = new Int32Array(state.objectCount);
 		}
-		for(i = 0; i < into.length; i++) {
+		for(var i = 0; i < into.length; i++) {
 			into[i] = 0;
 			arCounts[i] = 0;
 		}
-		for(var i = 0; i < level.n_tiles; i++) {
+		for(i = 0; i < level.n_tiles; i++) {
 			var bitmask = level.getCellInto(i,_oA);
 			for(var bit = 0; bit < 32 * STRIDE_OBJ; ++bit) {
 				if(bitmask.get(bit)) {
@@ -338,15 +370,14 @@ var Solver = (function() {
 	var tempNode = {
 		id:-1,
 		visited:false,
-		backup:null,
+		backup:{},
 		predecessors:[],
 		firstPrefix:[],
-		//successors:[],
 		winning:false,
 		eventualSolutions:[],
 		//indexing optimization:
 		objectCentroids:tempCentroids,
-		f:null, g:null, h:null
+		f:0, g:0, h:0
 	};
 
 	function createOrFindNode(pred, action) {
@@ -388,9 +419,8 @@ var Solver = (function() {
 			id:nodeId,
 			visited:false,
 			backup:backupLevel(),
-			predecessors:[],
-			firstPrefix:[],
-			//successors:[],
+			predecessors:pred ? [{action:action, predecessor:pred}] : [],
+			firstPrefix:pred ? pred.firstPrefix.slice() : [],
 			winning:winning,
 			eventualSolutions:[],
 			//indexing optimization:
@@ -399,9 +429,7 @@ var Solver = (function() {
 		};
 		nodeId++;
 		if(pred) {
-			//log("A add "+pred.id+":"+action+" to "+n.id);
-			n.predecessors.push({action:action, predecessor:pred});
-			n.firstPrefix = pred.firstPrefix.concat([action]);
+			n.firstPrefix.push(action);
 		}
 		return n;
 	}
@@ -574,7 +602,7 @@ var Solver = (function() {
 		if(n1 == n2) { return true; }
 		if(n1.winning != n2.winning) { return false; }
 		var n1BakObjs = null;
-		if(n1.backup) {
+		if(n1.backup && n1.backup.dat) {
 			n1BakObjs = n1.backup.dat;
 		} else {
 			n1BakObjs = level.objects;

@@ -69,6 +69,7 @@ var Analyzer = (function() {
 			levelQueue = createLevelQueue(true, curlevel !== undefined && curlevel > 0 ? [curlevel] : []);
 			consolePrint("Analyze levels:"+JSON.stringify(levelQueue));
 			tickLevelQueue(null);
+			tickLevelQueue(null);
 			lastRules = gameRules;
 		} else {
 			consolePrint("Rules are unchanged. Skipping analysis.");
@@ -90,12 +91,13 @@ var Analyzer = (function() {
 			editor.removeLineClass(l, "background", unsolvableClass);
 			editor.removeLineClass(l, "background", unsolvedClass);
 		}
+		lineHighlights = {};
 		for(var i=0; i < state.levels.length; i++) {
 			if(seenSolutions[i]) {
 				var upTo = nextEmptyLine(state.levels[i].lineNumber);
-				var solClass = seenSolutions[i].prefixes && seenSolutions[i].prefixes.length ? solvedClass :
+				var solClass = seenSolutions[i].solved ? solvedClass :
 					(seenSolutions[i].exhaustive ? unsolvableClass : unsolvedClass);
-				//console.log("highlight "+state.levels[i].lineNumber+".."+upTo+" with "+solClass);
+				console.log("highlight "+state.levels[i].lineNumber+".."+upTo+" with "+solClass);
 				for(l = state.levels[i].lineNumber-1; l < upTo; l++) {
 					editor.addLineClass(l, "background", solClass);
 					lineHighlights[l] = solClass;
@@ -131,11 +133,12 @@ var Analyzer = (function() {
 	function enqueueLevel(q,lev,force) {
 		var prevLevel = seenSolutions[lev] ? seenSolutions[lev].level : null;
 		var prevRules = seenSolutions[lev] ? seenSolutions[lev].ruleText : null;
-		if(equivLevels(prevLevel, state.levels[lev]) && equivRules(rulePart(prevRules), rulePart(gameRules))) {
-		  consolePrint("Level "+lev+" seems unchanged");
-		  return;
+		var stale = seenSolutions[lev] && seenSolutions[lev].stale;
+		if(stale || !equivLevels(prevLevel, state.levels[lev]) || !equivRules(rulePart(prevRules), rulePart(gameRules))) {
+			q.push(lev);
+			return;
 		}
-		q.push(lev);
+		consolePrint("Level "+lev+" seems unchanged");
 	}
 	
 	function createLevelQueue(force, prioritize) {
@@ -164,19 +167,21 @@ var Analyzer = (function() {
 		if(!levelQueue.length) { return; }
 		var lev = levelQueue.shift();
 		var level = state.levels[lev];
+		var hint = levelHint(lev);
+		if(seenSolutions[lev]) { seenSolutions[lev].stale = true; }
 		if(USE_WORKERS) {
 			startWorker("solve", lev, {
 				rules:gameRules,
 				level:lev,
 				//seed:randomseed,
-				hint:levelHint(lev),
+				hint:hint,
 				verbose:true
 			}, handleSolver, tickLevelQueue);
 		} else {
 			Solver.startSearch({
 				rules:gameRules,
 				level:lev,
-				hint:levelHint(lev),
+				hint:hint,
 				//seed:randomseed,
 				verbose:true,
 				replyFn:function(type,msg) {
@@ -217,12 +222,17 @@ var Analyzer = (function() {
 				break;
 			case "exhausted":
 				consolePrint("Level "+data.level+": Did not find more solutions after "+data.iterations+" iterations ("+data.time+" seconds)");
-				if(!seenSolutions[data.level]) {
+				if(!seenSolutions[data.level] || seenSolutions[data.level].stale) {
+					consolePrint("Level "+data.level+" was not solved!");
 					recordFailure(workers[id].init.rules, workers[id].init.levelText, data);
+					if(!data.exhaustive) {
+						levelQueue.push(data.level);
+					}
 				}
+				consoleCacheDump();
 				break;
 			case "hintInsufficient":
-				consolePrint("Level "+data.level+": Hint did not solve level on its own ("+data.time+" seconds)");
+				consolePrint("Level "+data.level+": Hints did not solve level on their own.");
 				break;
 			default:
 				break;
@@ -239,6 +249,8 @@ var Analyzer = (function() {
 			ruleText:ruleText,
 			levelText:levelText,
 			level:state.levels[level],
+			solved:true,
+			stale:false,
 			prefixes:soln.prefixes,
 			steps:soln.prefixes.map(prefixToSolutionSteps),
 			iteration:data.iteration,
@@ -256,7 +268,9 @@ var Analyzer = (function() {
 			ruleText:ruleText,
 			levelText:levelText,
 			level:state.levels[level],
-			prefixes:[],
+			solved:false,
+			stale:false,
+			prefixes:data.kickstart,
 			steps:[],
 			iteration:data.iteration,
 			exhaustive:data.queueLength == 0,
@@ -334,8 +348,8 @@ var Analyzer = (function() {
 					});
 					break;
 				case "stopped":
-					whenFinished(w);
 					killWorker(wtype,key);
+					whenFinished(w);
 					break;
 				default:
 					handle(id,type,data);

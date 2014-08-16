@@ -33,7 +33,7 @@ Protocol:
 */
 
 self.onmessage = function(msg) {
-	log("worker solve got a message "+JSON.stringify(msg.data));
+	// log("worker solve got a message "+JSON.stringify(msg.data));
 	if(workerDefault(msg)) {
 		log("returning early");
 		return;

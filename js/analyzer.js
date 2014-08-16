@@ -75,6 +75,12 @@ var Analyzer = (function() {
 			for(var i = 0; i < solvers.length; i++) {
 				killWorker("solve", solvers[i].key);
 			}
+			if(curlevel) {
+				curlevel = parseInt(curlevel);
+				if(isNaN(curlevel)) {
+					curlevel = undefined;
+				}
+			}
 			levelQueue = createLevelQueue(true, curlevel !== undefined && curlevel > 0 ? [curlevel] : []);
 			consolePrint("Analyze levels:"+JSON.stringify(levelQueue));
 			tickLevelQueue(null);
@@ -110,18 +116,19 @@ var Analyzer = (function() {
 	
 	function updateLevelHighlights() {
 		for(var l in lineHighlights) {
-			editor.removeLineClass(l, "background", solvedClass);
-			editor.removeLineClass(l, "background", unsolvableClass);
-			editor.removeLineClass(l, "background", unsolvedClass);
+			editor.removeLineClass(l, "background", lineHighlights[l]);
 		}
 		lineHighlights = {};
 		for(var i=0; i < state.levels.length; i++) {
-			if(seenSolutions[i]) {
+			if(state.levels[i].lineNumber && seenSolutions[i]) {
 				var upTo = nextEmptyLine(state.levels[i].lineNumber);
 				var solClass = seenSolutions[i].solved ? solvedClass :
 					(seenSolutions[i].exhaustive ? unsolvableClass : unsolvedClass);
 				console.log("highlight "+state.levels[i].lineNumber+".."+upTo+" with "+solClass);
 				for(l = state.levels[i].lineNumber-1; l < upTo; l++) {
+					editor.removeLineClass(l, "background", solvedClass);
+					editor.removeLineClass(l, "background", unsolvedClass);
+					editor.removeLineClass(l, "background", unsolvableClass);
 					editor.addLineClass(l, "background", solClass);
 					lineHighlights[l] = solClass;
 				}
@@ -388,7 +395,7 @@ var Analyzer = (function() {
 			var type = msg.data.type;
 			var data = msg.data.message;
 			var id = msg.data.id;
-			console.log("got "+type+":"+JSON.stringify(data));
+			// console.log("got "+type+":"+JSON.stringify(data));
 			switch(type) {
 				case "message":
 					console.log(""+data.severity + ":" + JSON.stringify(data.message));

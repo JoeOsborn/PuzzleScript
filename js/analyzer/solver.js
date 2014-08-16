@@ -33,7 +33,7 @@ var Solver = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 
-	var ITERS_PER_CONTINUATION = 5000;
+	var ITERS_PER_CONTINUATION = 50000;
 	var ITER_MAX = 100000;
 
 	var VERBOSE = false;
@@ -78,6 +78,13 @@ var Solver = (function() {
 		} else {
 			compile(["loadLevel", LEVEL], RULES, SEED);
 		}
+		
+		state.sfx_Events = {};
+		state.sfx_CreationMasks = [];
+		state.sfx_DestructionMasks = [];
+		state.sfx_MovementMasks = [];
+		state.sfx_MovementFailureMasks = [];
+		
 		INIT_LEVEL = backupLevel();
 
 		if (!state.levels[LEVEL] || state.levels[LEVEL].message) {
@@ -284,6 +291,7 @@ var Solver = (function() {
 	}
 
 	function addEventualSolution(nodePreds,s) {
+		if(FIRST_SOLN_ONLY) { return; }
 		if(nodePreds.length == 0) { return; }
 		for(var ni in nodePreds) {
 			var n = nodePreds[ni].predecessor;
@@ -342,27 +350,19 @@ var Solver = (function() {
 		});
 	};
 
-	var arCounts, tempCentroids;
-	function findCentroids(into) {
+	var tempCentroids;
+	function findDenormCentroids(into) {
 		if(!into || into.length != state.objectCount) { into = new Int32Array(state.objectCount); }
-		if(!arCounts || into.length != arCounts.length) {
-			arCounts = new Int32Array(state.objectCount);
-		}
 		for(var i = 0; i < into.length; i++) {
 			into[i] = 0;
-			arCounts[i] = 0;
 		}
 		for(i = 0; i < level.n_tiles; i++) {
 			var bitmask = level.getCellInto(i,_oA);
-			for(var bit = 0; bit < 32 * STRIDE_OBJ; ++bit) {
+			for(var bit = 0; bit < state.objectCount; ++bit) {
 				if(bitmask.get(bit)) {
-					arCounts[bit] += 1;
 					into[bit] += i;
 				}
 			}
-		}
-		for(i = 0; i < into.length; i++) {
-			into[i] = (into[i] / arCounts[i]) | 0;
 		}
 		return into;
 	}
@@ -376,14 +376,14 @@ var Solver = (function() {
 		winning:false,
 		eventualSolutions:[],
 		//indexing optimization:
-		objectCentroids:tempCentroids,
+		keys:tempCentroids,
 		f:0, g:0, h:0
 	};
 
 	function createOrFindNode(pred, action) {
-		tempCentroids = findCentroids(tempCentroids);
+		tempCentroids = findDenormCentroids(tempCentroids);
 		tempNode.winning = winning;
-		tempNode.objectCentroids = tempCentroids;
+		tempNode.keys = tempCentroids;
 		var existingInClosed = member(tempNode,closed);
 		var existingInOpen = existingInClosed ? null : member(tempNode,open);
 		var existingN = existingInClosed || existingInOpen;
@@ -424,7 +424,7 @@ var Solver = (function() {
 			winning:winning,
 			eventualSolutions:[],
 			//indexing optimization:
-			objectCentroids:new Int32Array(tempCentroids),
+			keys:new Int32Array(tempCentroids),
 			f:g+h, g:g, h:h
 		};
 		nodeId++;
@@ -525,9 +525,9 @@ var Solver = (function() {
 		return h/state.winconditions.length;
 	}
 	function distance(i,j) {
-		var ix = floor(i / level.height);
+		var ix = (i / level.height)|0;
 		var iy = i - ix*level.height;
-		var jx = floor(j / level.height);
+		var jx = (j / level.height)|0;
 		var jy = j - jx*level.height;
 		return abs(ix-jx) + abs(iy-jy);
 	}
@@ -588,7 +588,7 @@ var Solver = (function() {
 	
 	function getInnerSet(node,set) {
 		var innerSet = set;
-		var ocs = node.objectCentroids;
+		var ocs = node.keys;
 		for(var i = 0; i < ocs.length; i++) {
 			if(!innerSet[ocs[i]]) {
 				innerSet[ocs[i]] = (i == ocs.length - 1) ? [] : {};
@@ -666,14 +666,16 @@ var Solver = (function() {
 
 	function switchToSearchState(searchState) {
 		winning = false;
-		RandomGen = new RNG(searchState.RNG);
+		// if(state.anyRandomRules) {
+		// 	RandomGen = new RNG(searchState.RNG);
+		// }
 		titleScreen=false;
 		titleSelected=false;
 		againing=false;
 		titleMode=0;
 		textMode=false;
 		restoreLevel(searchState.backup);
-		backups.splice(0,backups.length);
+		backups.length = 0;
 		restartTarget=searchState.backup;
 	};
 

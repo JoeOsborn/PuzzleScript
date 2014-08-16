@@ -709,6 +709,8 @@ function RebuildLevelArrays() {
 	_o10 = new BitVec(STRIDE_OBJ);
 	_o11 = new BitVec(STRIDE_OBJ);
 	_o12 = new BitVec(STRIDE_OBJ);
+	sfxCreateMask = new BitVec(STRIDE_OBJ);
+	sfxDestroyMask = new BitVec(STRIDE_OBJ);
 	_m1 = new BitVec(STRIDE_MOV);
 	_m2 = new BitVec(STRIDE_MOV);
 	_m3 = new BitVec(STRIDE_MOV);
@@ -730,7 +732,8 @@ function RebuildLevelArrays() {
 
 var messagetext="";
 function restoreLevel(lev) {
-	oldflickscreendat=[];
+	if(!oldflickscreendat) { oldflickscreendat=[]; }
+	else { oldflickscreendat.length = 0; }
 
 	level.objects = new Int32Array(lev.dat);
 	if (level.width !== lev.width || level.height !== lev.height) {
@@ -762,7 +765,8 @@ function restoreLevel(lev) {
 
     againing=false;
     messagetext="";
-    level.commandQueue=[];
+    if(!level.commandQueue) { level.commandQueue=[]; }
+    else { level.commandQueue.length = 0; }
 }
 
 var zoomscreen=false;
@@ -791,7 +795,7 @@ function DoRestart(force) {
     	processInput(-1,true);
 	}
 	
-	level.commandQueue=[];
+	level.commandQueue.length=0;
 }
 
 function DoUndo(force) {
@@ -802,9 +806,8 @@ function DoUndo(force) {
 		consolePrint("--- undoing ---",true);
 	}
 	if (backups.length>0) {
-		var tobackup = backups[backups.length-1];
+		var tobackup = backups.pop();
 		restoreLevel(tobackup);
-		backups = backups.splice(0,backups.length-1);
 		if (! force) {
 			tryPlayUndoSound();
 		}
@@ -821,8 +824,8 @@ function getPlayerPositions(positions) {
     }
 }
 
-function getLayersOfMask(cellMask) {
-    var layers=[];
+function getLayersOfMask(cellMask,layers) {
+    layers=layers || [];
     for (var i=0;i<state.objectCount;i++) {
         if (cellMask.get(i)) {
             var n = state.idDict[i];
@@ -833,14 +836,16 @@ function getLayersOfMask(cellMask) {
     return layers;
 }
 
+var _tempMoveLayers = [];
 function moveEntitiesAtIndex(positionIndex, entityMask, dirMask) {
-    var cellMask = level.getCell(positionIndex);
+    var cellMask = level.getCellInto(positionIndex,_o12);
     cellMask.iand(entityMask);
-    var layers = getLayersOfMask(cellMask);
+    _tempMoveLayers.length = 0;
+    getLayersOfMask(cellMask,_tempMoveLayers);
 
     var movementMask = level.getMovements(positionIndex);
-    for (var i=0;i<layers.length;i++) {
-    	movementMask.ishiftor(dirMask, 5 * layers[i]);
+    for (var i=0;i<_tempMoveLayers.length;i++) {
+    	movementMask.ishiftor(dirMask, 5 * _tempMoveLayers[i]);
     }
     level.setMovements(positionIndex, movementMask);
 }
@@ -916,7 +921,7 @@ function repositionEntitiesOnLayer(positionIndex,layer,dirMask)
 		}
 	}
 
-    var movingEntities = sourceMask.clone();
+    var movingEntities = sourceMask.cloneInto(_o9);
     sourceMask.iclear(layerMask);
     movingEntities.iand(layerMask);
     targetMask.ior(movingEntities);
@@ -963,6 +968,7 @@ function Level(lineNumber, width, height, layerCount, objects) {
 	this.objects = objects;
 	this.layerCount = layerCount;
 	this.commandQueue = [];
+	this.bannedGroup = [];
 }
 
 Level.prototype.clone = function() {
@@ -2100,10 +2106,13 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 	}
 
 	var bak;
-	if(premadeBackup) { bak = premadeBackup; }
-	else { bak = backupLevel(); }
+	if(premadeBackup) { 
+		bak = premadeBackup; 
+	} else { 
+		bak = backupLevel(); 
+	}
 
-	playerPositions.splice(0,playerPositions.length);
+	playerPositions.length = 0;
     if (dir<=4) {
     	if (dir>=0) {
 	        switch(dir){
@@ -2138,18 +2147,21 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 
         var i=0;
         var first=true;
-        level.bannedGroup = [];
-        rigidBackups = [];
-        level.commandQueue=[];
+        level.bannedGroup.length = 0;
+        rigidBackups.length = 0;
+        level.commandQueue.length = 0;
         var startRuleGroupIndex=0;
         var rigidloop=false;
-        var startState = commitPreservationState();
+        //We know that shouldUndo (down in the while(first || rigidloop) loop) will only ever
+        // be true if resolveMovements returns true, which will only return true in the presence
+        // of rigidbody rules. So, there's no point making a copy of the level that will never be used!
+        var startState = state.rigidGroups.length > 0 ? commitPreservationState() : null;
 	    messagetext="";
-	    sfxCreateMask=new BitVec(STRIDE_OBJ);
-	    sfxDestroyMask=new BitVec(STRIDE_OBJ);
+	    sfxCreateMask.setZero();
+	    sfxDestroyMask.setZero();
 
-		seedsToPlay_CanMove=[];
-		seedsToPlay_CantMove=[];
+		seedsToPlay_CanMove.length = 0;
+		seedsToPlay_CantMove.length = 0;
 
 		calculateRowColMasks();
 
@@ -2167,6 +2179,9 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 
         	if (shouldUndo) {
         		rigidloop=true;
+        		if(!startState) {
+        		    throw new Error("Violated assumption about rigid bodies and preservation states!");
+        		}
         		restorePreservationState(startState);
         		startRuleGroupIndex=0;//rigidGroupUndoDat.ruleGroupIndex+1;
         	} else {
@@ -2185,7 +2200,7 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
         	var somemoved=false;
         	for (var i=0;i<playerPositions.length;i++) {
         		var pos = playerPositions[i];
-        		var val = level.getCell(pos);
+        		var val = level.getCellInto(pos,_o12);
         		if (state.playerMask.bitsClearInArray(val.data)) {
         			somemoved=true;
         			break;
@@ -2231,27 +2246,23 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 	    }
 	    
         var modified=false;
-	    for (var i=0;i<level.objects.length;i++) {
-	    	if (level.objects[i]!==bak.dat[i]) {
-				if (dontModify) {
-	        		if (verbose_logging) {
-	        			consoleCacheDump();
-	        		}
-					//@@cancel-ish
-	        		backups.push(bak);
-	        		DoUndo(true);
-					return true;
-				} else {
-					if (dir!==-1) {
-	    				backups.push(bak);
-	    			}
-	    			modified=true;
-	    		}
-	    		break;
-	    	}
-	    }
+        for (var i=0;i<level.objects.length;i++) {
+            if (level.objects[i]!==bak.dat[i]) {
+                modified = true;
+                break;
+            }
+        }
+        if(dontModify && modified) {
+            //@@cancel-ish
+            backups.push(bak);
+            DoUndo(true);
+            return true;
+        }
+        if(modified && dir !== -1) {
+            backups.push(bak);
+        }
 
-		if (dontModify) {		
+        if (dontModify) {		
     		if (verbose_logging) {
     			consoleCacheDump();
     		}
@@ -2335,7 +2346,7 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 		}
 		    
 
-	    level.commandQueue=[];
+        level.commandQueue.length = 0;
 
     }
 

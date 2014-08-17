@@ -1,5 +1,3 @@
-"use strict";
-
 var scope = self;
 
 // performance.now polyfill © Paul Irish
@@ -9,7 +7,7 @@ var scope = self;
 // if you want values similar to what you'd get with real perf.now, place this towards the head of the page
 // but in reality, you're just getting the delta between now() calls, so it's not terribly important where it's placed
 // prepare base perf object
-if (!performance || typeof performance === 'undefined') {
+if (!scope.hasOwnProperty("performance") || !performance || typeof performance === 'undefined') {
     performance = {};
 }
 

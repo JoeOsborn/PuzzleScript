@@ -9,3 +9,35 @@
 .line-unsolvable {
     background: rgb(163, 55, 55) !important;
 }
+
+.line-hint-used {
+    background: rgb(28, 109, 28) !important;
+}
+
+.line-hint-unused {
+    background: rgb(163, 55, 55) !important;
+}
+
+.line-solution-got-longer {
+    color: yellow !important;
+}
+.line-solution-got-shorter {
+    color: yellow !important;
+}
+.line-solution-disappeared {
+    color: red !important;
+}
+.line-solution-appeared {
+    color: yellow !important;
+}
+
+.line-level-solvable {
+    color: green !important;
+}
+.line-level-unsolvable {
+    color: red !important;
+}
+
+.line-insufficient-hints {
+    color: yellow !important;
+}

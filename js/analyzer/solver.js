@@ -39,22 +39,26 @@ var Solver = (function() {
 	var LEVEL = 0, RULES = "", SEED = null;
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
 	
-	var FIRST_SOLN_ONLY = true;
-	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
-	//Longer -> lower value for G_DISCOUNT
-	//For shortish games, maybe even set skip_h=true
-	var SKIP_H = false;
-	var G_DISCOUNT = 1.0;
-
 	var INIT_LEVEL;
-
-	var ACTIONS;
-	
+	var ACTIONS;	
 	var START_TIME = 0;
+
+	var FIRST_SOLUTION_ONLY = true;
+	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
+	//Longer -> lower value for gDiscount
+	//For shortish games, maybe even set hDiscount=0
+	var hDiscount = 1.0;
+	var gDiscount = 1.0;
+    var gLimit = Infinity;
+
+    var pauseAfterNextSolution = false;
+    var sentSolution = false;
+    var bestSolution;
 
 	var nodeId=0;
 	var open, closed, q;
 	var root;
+    var MODE = "fast";
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
@@ -66,6 +70,17 @@ var Solver = (function() {
 		RULES = config.rules;
 		SEED = config.seed;
 		VERBOSE = config.verbose;
+        MODE = config.mode || mode;
+        if(MODE == "fast") {
+            FIRST_SOLUTION_ONLY = true;
+            gDiscount = 1.0;
+            hDiscount = 1.0;
+        } else if(MODE == "fast_then_best") {
+            FIRST_SOLUTION_ONLY = false;
+            pauseAfterNextSolution = true;
+            gDiscount = 1.0;
+            hDiscount = 1.0;
+        }
 		if(config.replyFn) {
 			REPLY_FN = config.replyFn;
 		}
@@ -106,6 +121,8 @@ var Solver = (function() {
 		enqueueNode(root);
 		
 		if(config.hint && config.hint.prefixes && config.hint.prefixes.length) {
+            var initHDiscount = hDiscount;
+            hDiscount = 0;
 			var hint = config.hint;
 			for(var hi=0; hi < hint.prefixes.length; hi++) {
 				var node = root;
@@ -125,7 +142,6 @@ var Solver = (function() {
 						if(!newNodes[ni]) { continue; }
 						if(hasPredecessor(newNodes[ni],node,hint.prefixes[hi][ai])) {
 							node = newNodes[ni];
-							node.g = node.f = 0;
 							// log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
 							break;
 						}
@@ -143,6 +159,7 @@ var Solver = (function() {
 					time:timeSinceStart()
 				});
 			}
+            hDiscount = initHDiscount;
 		}
 
 		Solver.continueSearch(0);
@@ -162,6 +179,7 @@ var Solver = (function() {
 	}
 
 	module.continueSearch = function(continuation) {
+        sentSolution = false;
 		testsAutoAdvanceLevel = false;
 		unitTesting = true;
 		var iters = searchSome(continuation);
@@ -237,11 +255,21 @@ var Solver = (function() {
 			//log("Dat:"+JSON.stringify(node.backup));
 			exactRemove(node,open);
 			exactInsert(node,closed);
+            //just close nodes with best paths longer than or equal to gLimit.
+            if(node.g >= gLimit) { continue; }
 			expand(iter,node,null);
+            if(pauseAfterNextSolution && sentSolution) {
+                sentSolution = false;
+                pauseAfterNextSolution = false;
+                if(MODE == "fast_then_best") {
+                    gLimit = bestSolution.g;
+                } 
+                return iter;
+            }
 		}
 		return iter;
 	}
-	function expand(iter,node,track) {
+	function expand(iter,node,track,hintDiscount) {
 		node.visited = true;
 		//for each action valid in the game:
 		for(var ai = 0; ai < ACTIONS.length; ai++) {
@@ -249,7 +277,7 @@ var Solver = (function() {
 			//switch to this state, perform action, createOrFindNode()
 			switchToSearchState(node);
 			processInput(action,false,false,node.backup);
-			var currentNode = createOrFindNode(node,action);
+			var currentNode = createOrFindNode(node,action,hintDiscount);
 			if(track) {
 				track[ai] = currentNode;
 			}
@@ -259,7 +287,7 @@ var Solver = (function() {
 				//log("WIN");
 				postSolution(currentNode, iter);
 				
-				if(FIRST_SOLN_ONLY) {
+				if(FIRST_SOLUTION_ONLY) {
 					q = new priority_queue.PriorityQueue();
 					open = initSet();
 					closed = initSet();
@@ -289,7 +317,7 @@ var Solver = (function() {
 	}
 
 	function addEventualSolution(nodePreds,s) {
-		if(FIRST_SOLN_ONLY) { return; }
+		if(FIRST_SOLUTION_ONLY) { return; }
 		if(nodePreds.length == 0) { return; }
 		for(var ni in nodePreds) {
 			var n = nodePreds[ni].predecessor;
@@ -341,11 +369,15 @@ var Solver = (function() {
 				g:currentNode.g,
 				h:currentNode.h,
 				f:currentNode.f,
-				prefixes:FIRST_SOLN_ONLY ? [currentNode.firstPrefix] : prefixes(currentNode)
+				prefixes:FIRST_SOLUTION_ONLY ? [currentNode.firstPrefix] : prefixes(currentNode)
 			}, 
 			iteration:iter,
 			time:timeSinceStart()
 		});
+        sentSolution = true;
+        if(!bestSolution || currentNode.g < bestSolution.g) {
+            bestSolution =currentNode;
+        }
 	};
 
 	var tempCentroids;
@@ -385,7 +417,7 @@ var Solver = (function() {
 		var existingInClosed = member(tempNode,closed);
 		var existingInOpen = existingInClosed ? null : member(tempNode,open);
 		var existingN = existingInClosed || existingInOpen;
-		var g = pred ? pred.g+1*G_DISCOUNT : 0;
+		var g = pred ? pred.g+1 : 0;
 		if(existingN) {
 			if(pred) {
 				//pred.successors[action] = existingN;
@@ -398,7 +430,7 @@ var Solver = (function() {
 				// if(existingInOpen) {
 				// 	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
-				existingN.f = existingN.g + existingN.h;
+				existingN.f = existingN.g*gDiscount + existingN.h*hDiscount;
 				if(existingInOpen) {
 					//let's just live with duplicate items!
 					q.push(existingN);
@@ -423,7 +455,7 @@ var Solver = (function() {
 			eventualSolutions:[],
 			//indexing optimization:
 			keys:new Int32Array(tempCentroids),
-			f:g+h, g:g, h:h
+			f:g*gDiscount+h*hDiscount, g:g, h:h
 		};
 		nodeId++;
 		if(pred) {
@@ -446,8 +478,8 @@ var Solver = (function() {
 	var abs = Math.abs;
 
 	function calculateH() {
+		if(hDiscount <= 0 || state.winconditions.length==0) { return 0; }
 		var h = 0;
-		if(SKIP_H || state.winconditions.length==0) { return h; }
 		for (var wcIndex=0;wcIndex<state.winconditions.length;wcIndex++) {
 			var wincondition = state.winconditions[wcIndex];
 			var filter1 = wincondition[1]; //"X"; if univ, will always pass

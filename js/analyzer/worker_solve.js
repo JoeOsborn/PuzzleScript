@@ -44,7 +44,7 @@ self.onmessage = function(msg) {
 			Solver.startSearch(msg.data.init);
 			break;
 		case "resume":
-			log("resuming");
+			log("resuming "+msg.data.continuation);
 			Solver.continueSearch(msg.data.continuation);
 			break;
 		default:

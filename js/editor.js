@@ -159,7 +159,6 @@ function tryLoadFile(fileName) {
 }
 
 function dropdownChange() {
-  Analyzer.clear();
 	tryLoadFile(this.value);
 	this.selectedIndex=0;
 }

@@ -13,6 +13,17 @@ if(!this.hasOwnProperty("compileAndAnalyze") ||
 	compile = compileAndAnalyze;
 }
 
+if(!this.hasOwnProperty("setEditorAnalyzerClean") ||
+	 !this.setEditorAnalyzerClean) {
+	console.log("patch setEditorClean");
+	var justSetClean = setEditorClean;
+	var setEditorAnalyzerClean = function() {
+		justSetClean();
+		Analyzer.clear();
+	}
+	setEditorClean = setEditorAnalyzerClean;	
+}
+
 var code = window.form1.code;
 var editor = code ? code.editorreference : null;
 

@@ -11,7 +11,7 @@ if (!scope.hasOwnProperty("performance") || !performance || typeof performance =
     performance = {};
 }
 
-if (!performance.now){
+if (!performance.now) {
   var nowOffset = Date.now();
   if (performance.timing && performance.timing.navigationStart){
     nowOffset = performance.timing.navigationStart

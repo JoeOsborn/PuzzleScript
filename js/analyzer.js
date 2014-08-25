@@ -55,12 +55,15 @@ var Analyzer = (function() {
 	var lastSeenSolutions = {};
 	
 	var lineHighlights = {};
-	var solvedClass = "line-solved";
-	var unsolvedClass = "line-unsolved";
-	var unsolvableClass = "line-unsolvable";
+	var solvedClass = "line-editor-solved";
+	var unsolvedClass = "line-editor-unsolved";
+	var unsolvableClass = "line-editor-unsolvable";
 
-	var hintUsedClass = "line-hint-used";
-	var hintUnusedClass = "line-hint-unused";
+	var hintUsedClass = "line-editor-hint-used";
+	var hintUnusedClass = "line-editor-hint-unused";
+
+	var lineSolutionTooShortClass = "line-editor-solution-too-short";
+	var lineSolutionTooLongClass = "line-editor-solution-too-long";
 	
 	var workers = [];
 	var workerLookup = {};
@@ -194,14 +197,15 @@ var Analyzer = (function() {
 	}
 	
 	function clearLineHighlights() {
+		console.log("Clear line highlights "+JSON.stringify(lineHighlights));
 		for(var l in lineHighlights) {
-			editor.removeLineClass(l, "background", lineHighlights[l]);
+			editor.removeLineClass(parseInt(l), "background", lineHighlights[l]);
 		}
+		lineHighlights = {};
 	}
 	
 	function updateLevelHighlights() {
 		clearLineHighlights();
-		lineHighlights = {};
 		for(var i=0; i < state.levels.length; i++) {
 			if(state.levels[i].lineNumber && seenSolutions[i]) {
 				var upTo = nextEmptyLine(state.levels[i].lineNumber);
@@ -227,6 +231,28 @@ var Analyzer = (function() {
 						editor.removeLineClass(l, "background", hintUnusedClass);
 						editor.addLineClass(l, "background", hintClass);
 						lineHighlights[l] = hintClass;
+					}
+					var bounds = solutionBounds(i);
+					var short = shortest(seenSolutions[i].steps);
+					for(j = 0; j < bounds.lowBounds.length; j++) {
+						var b = bounds.lowBounds[j];
+						var v = b.bound;
+						l = b.line;
+						if(short.length < v) {
+							console.log(""+l+" lower than "+v);
+							editor.addLineClass(l, "background", lineSolutionTooShortClass);
+							lineHighlights[l] = lineSolutionTooShortClass;
+						}
+					}
+					for(j = 0; j < bounds.highBounds.length; j++) {
+						var b = bounds.highBounds[j];
+						var v = b.bound;
+						l = b.line;
+						if(short.length > v) {
+							console.log(""+l+" longer than "+v);
+							editor.addLineClass(l, "background", lineSolutionTooLongClass);
+							lineHighlights[l] = lineSolutionTooLongClass;
+						}
 					}
 				}
 			}
@@ -306,6 +332,46 @@ var Analyzer = (function() {
 		//console.log("Using hints "+hints.map(prefixToSolutionSteps).join("<br/>&nbsp;&nbsp;"));
 		return {prefixes:hints, lines:lines};
 	}
+
+	function annotationsBetween(l1, l2) {
+		var annos = [];
+		for(var l = l1; l < l2; l++) {
+			var line = editor.getLine(l).trim();
+			var match = /\(\s*@(.*)\s*:\s*(.*)\s*\)/i.exec(line);
+			if(match) {
+				annos.push({
+					type:match[1].trim().toUpperCase(), 
+					content:match[2].trim(), 
+					line:l
+				});
+			}
+		}
+		return annos;
+	}
+	
+	function solutionBounds(lev) {
+		var annotations = annotationsBetween(
+			state.levels[lev].lineNumber+1, 
+			nextLevelLine(lev)
+		);
+		var low = 0;
+		var high = Infinity;
+		var lowBounds = [];
+		var highBounds = [];
+		var bval;
+		for(var i = 0; i < annotations.length; i++) {
+			if(annotations[i].type == "MOST") {
+				bval = parseInt(annotations[i].content);
+				high = Math.min(high,bval);
+				highBounds.push({line:annotations[i].line, bound:bval});
+			} else if(annotations[i].type == "LEAST") {
+				bval = parseInt(annotations[i].content);
+				low = Math.max(low,bval);
+				lowBounds.push({line:annotations[i].line, bound:bval});
+			}
+		}
+		return {low:low, high:high, lowBounds:lowBounds, highBounds:highBounds};
+	}
 	
 	function levelHint(lev) {
 		var userHints = hintLinesBetween(state.levels[lev].lineNumber+1, nextLevelLine(lev));
@@ -374,6 +440,16 @@ var Analyzer = (function() {
 		);
 	}
 	
+	function shortest(l) {
+		var least = null;
+		for(var i = 0; i < l.length; i++) {
+			if(!least || l[i].length < least.length) {
+				least = l[i];
+			}
+		}
+		return least;
+	}
+	
 	function handleSolver(id,type,data) {
 		switch(type) {
 			case "solution":
@@ -397,6 +473,26 @@ var Analyzer = (function() {
 						consolePrint("Level "+data.level+" is taking some time to solve.");
 					} else {
 						consolePrint("<span class='line-level-unsolvable'>Level "+data.level+" is not solvable!</span>");
+					}
+				}
+				if(seenSolutions[data.level].solved) {
+					var bounds = solutionBounds(data.level);
+					var short = shortest(seenSolutions[data.level].steps);
+					if(short.length < bounds.low) {
+						consolePrint(
+							"<span class='line-solution-too-short'>Level "+data.level+": Shortest solution<br/>"+
+							"&nbsp;"+short.join(" ")+"<br/>"+
+							"&nbsp;is shorter than designer-supplied minimum length "+bounds.low+
+							"</span>"
+						);
+					}
+					if(short.length > bounds.high) {
+						consolePrint(
+							"<span class='line-solution-too-long'>Level "+data.level+": Shortest solution<br/>"+
+							"&nbsp;"+short.join(" ")+"<br/>"+
+							"&nbsp;is longer than designer-supplied maximum length "+bounds.high+
+							"</span>"
+						);
 					}
 				}
 				if(lastSeenSolutions[data.level]) {
@@ -453,6 +549,7 @@ var Analyzer = (function() {
 								'</span>'
 							);
 						}
+		
 					} else if(lastSeenSolutions[data.level].solved) {
 						//level used to be solvable but now is not
 						consolePrint(
@@ -502,7 +599,6 @@ var Analyzer = (function() {
 			seenSolutions[level].steps = seenSolutions[level].steps.concat(soln.prefixes.map(prefixToSolutionSteps));
 			seenSolutions[level].exhaustive = data.queueLength == 0;
 		}
-		
 		updateLevelHighlights();
 		return seenSolutions[level];
 	}

@@ -1,20 +1,27 @@
-.line-solved {
+.line-editor-solved {
     background: rgb(28, 109, 28) !important;
 }
 
-.line-unsolved {
+.line-editor-unsolved {
     background: rgb(106, 114, 17) !important;
 }
 
-.line-unsolvable {
+.line-editor-unsolvable {
     background: rgb(163, 55, 55) !important;
 }
 
-.line-hint-used {
+.line-editor-hint-used {
     background: rgb(28, 109, 28) !important;
 }
 
-.line-hint-unused {
+.line-editor-hint-unused {
+    background: rgb(163, 55, 55) !important;
+}
+
+.line-editor-solution-too-long {
+    background: rgb(163, 55, 55) !important;
+}
+.line-editor-solution-too-short {
     background: rgb(163, 55, 55) !important;
 }
 
@@ -29,6 +36,13 @@
 }
 .line-solution-appeared {
     color: yellow !important;
+}
+
+.line-solution-too-long {
+    color: red !important;
+}
+.line-solution-too-short {
+    color: red !important;
 }
 
 .line-level-solvable {

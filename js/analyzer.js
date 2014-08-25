@@ -366,7 +366,7 @@ var Analyzer = (function() {
 	function handleSolver(id,type,data) {
 		switch(type) {
 			case "solution":
-				consolePrint("<span class='line-level-solvable'>Level "+data.level+": Found solution #"+1+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+" ("+data.time+" seconds):<br/>&nbsp;"+data.solution.prefixes.map(function(p) { return prefixToSolutionSteps(p).join(","); }).join("<br/>&nbsp;")+"</span>");
+				consolePrint("<span class='line-level-solvable'>Level "+data.level+": Found solution #"+1+" (n"+data.solution.id+") of first-found cost "+data.solution.prefixes[0].length+" at iteration "+data.iteration+" ("+data.time+" seconds):<br/>&nbsp;"+data.solution.prefixes.map(function(p) { return prefixToSolutionSteps(p).join(" "); }).join("<br/>&nbsp;")+"</span>");
 				if(data.iteration == 0) {
 					consolePrint("&nbsp;(Thanks to hint from last time)");
 				}

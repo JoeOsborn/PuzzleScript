@@ -117,12 +117,21 @@ var Solver = (function() {
 		open = initSet();
 		closed = initSet();
 		q = new priority_queue.PriorityQueue(function(a,b) { return a.f-b.f; });
+        
+        var initHDiscount = hDiscount;
+        var initGDiscount = gDiscount;
+        hDiscount = 0;
+        gDiscount = 0;
 		root = createOrFindNode(null,WAIT);
 		enqueueNode(root);
+        hDiscount = initHDiscount;
+        gDiscount = initGDiscount;
+        
+        //log("lvl"+LEVEL+": config.hint="+JSON.stringify(config.hint));
 		
 		if(config.hint && config.hint.prefixes && config.hint.prefixes.length) {
-            var initHDiscount = hDiscount;
             hDiscount = 0;
+            gDiscount = 0;
 			var hint = config.hint;
 			for(var hi=0; hi < hint.prefixes.length; hi++) {
 				var node = root;
@@ -132,7 +141,7 @@ var Solver = (function() {
 						log("Got a win earlier than expected");
 						break;
 					}
-					// log("expanding "+node.id+" due to hint");
+					//log("expanding "+node.id+" due to hint");
 					q.removeItem(node);
 					remove(node,open);
 					insert(node,closed);
@@ -142,7 +151,7 @@ var Solver = (function() {
 						if(!newNodes[ni]) { continue; }
 						if(hasPredecessor(newNodes[ni],node,hint.prefixes[hi][ai])) {
 							node = newNodes[ni];
-							// log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
+							//log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
 							break;
 						}
 					}
@@ -160,6 +169,7 @@ var Solver = (function() {
 				});
 			}
             hDiscount = initHDiscount;
+            gDiscount = initGDiscount;
 		}
 
 		Solver.continueSearch(0);
@@ -269,7 +279,7 @@ var Solver = (function() {
 		}
 		return iter;
 	}
-	function expand(iter,node,track,hintDiscount) {
+	function expand(iter,node,track) {
 		node.visited = true;
 		//for each action valid in the game:
 		for(var ai = 0; ai < ACTIONS.length; ai++) {
@@ -277,7 +287,7 @@ var Solver = (function() {
 			//switch to this state, perform action, createOrFindNode()
 			switchToSearchState(node);
 			processInput(action,false,false,node.backup);
-			var currentNode = createOrFindNode(node,action,hintDiscount);
+			var currentNode = createOrFindNode(node,action);
 			if(track) {
 				track[ai] = currentNode;
 			}
@@ -417,7 +427,7 @@ var Solver = (function() {
 		var existingInClosed = member(tempNode,closed);
 		var existingInOpen = existingInClosed ? null : member(tempNode,open);
 		var existingN = existingInClosed || existingInOpen;
-		var g = pred ? pred.g+1 : 0;
+		var g = pred ? pred.g+gDiscount : 0;
 		if(existingN) {
 			if(pred) {
 				//pred.successors[action] = existingN;
@@ -430,7 +440,7 @@ var Solver = (function() {
 				// if(existingInOpen) {
 				// 	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
-				existingN.f = existingN.g*gDiscount + existingN.h*hDiscount;
+				existingN.f = existingN.g + existingN.h;
 				if(existingInOpen) {
 					//let's just live with duplicate items!
 					q.push(existingN);
@@ -444,7 +454,7 @@ var Solver = (function() {
 			return existingN;
 		}
 		//actually make a node data structure
-		var h = calculateH();
+		var h = calculateH()*hDiscount;
 		var n = {
 			id:nodeId,
 			visited:false,
@@ -455,7 +465,7 @@ var Solver = (function() {
 			eventualSolutions:[],
 			//indexing optimization:
 			keys:new Int32Array(tempCentroids),
-			f:g*gDiscount+h*hDiscount, g:g, h:h
+			f:g+h, g:g, h:h
 		};
 		nodeId++;
 		if(pred) {

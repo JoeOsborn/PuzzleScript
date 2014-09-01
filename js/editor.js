@@ -32,8 +32,12 @@ var editor = window.CodeMirror.fromTextArea(code, {
 //	viewportMargin: Infinity,
 	lineWrapping: true,
 	lineNumbers: true,
-      styleActiveLine: true
-	});
+	styleActiveLine: true,
+	gutters: window.Analyzer ? ["CodeMirror-linenumbers", window.Analyzer.analyzerRuleCountGutter] : ["CodeMirror-linenumbers"]
+});
+if(window.Analyzer) {
+	editor.on("gutterClick", Analyzer.onEditorGutterClick);
+}
 
 editor.on('mousedown', function(cm, event) {
   if (event.target.className == 'cm-SOUND') {
@@ -134,6 +138,9 @@ function tryLoadGist(id) {
 			editor.setValue(code);
 			setEditorClean();
 			unloadGame();
+			if(Analyzer) {
+				Analyzer.clear();
+			}
 			compile(["restart"],code);
 		}
 	}
@@ -153,6 +160,9 @@ function tryLoadFile(fileName) {
 		editor.setValue(fileOpenClient.responseText);
 		setEditorClean();
 		unloadGame();
+		if(Analyzer) {
+			Analyzer.clear();
+		}
 		compile(["restart"]);
 	}
 	fileOpenClient.send();

@@ -25,6 +25,11 @@
     background: rgb(163, 55, 55) !important;
 }
 
+.analyzer-rulecount {
+    width: 24px;
+		padding-left: 4px;
+}
+
 .line-solution-got-longer {
     color: yellow !important;
 }

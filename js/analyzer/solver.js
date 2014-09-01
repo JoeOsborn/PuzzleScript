@@ -287,6 +287,9 @@ var Solver = (function() {
 			//switch to this state, perform action, createOrFindNode()
 			switchToSearchState(node);
 			processInput(action,false,false,node.backup);
+			while(againing) {
+				processInput(-1);
+			}
 			var currentNode = createOrFindNode(node,action);
 			if(track) {
 				track[ai] = currentNode;
@@ -369,8 +372,34 @@ var Solver = (function() {
 		//log("Returning "+JSON.stringify(ret)+" for "+n.id);
 		return ret;
 	}
+    
+	var storedRuleCounts;
+	var storedRuleCategory = Utilities.RC_CATEGORY_WIN;
+	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
+		Utilities.incrementRuleCount(storedRuleCounts,LEVEL,storedRuleCategory,ruleGroup,ruleIndex);
+	};
+	function getRuleCounts(currentNode, prefix) {
+		var retval = [];
+		//alias storedRuleCounts to our return value
+		storedRuleCounts = retval;
+		registerApplyAtWatcher(ruleApplied);
+		//go to initial state
+		switchToSearchState(root);
+		//run prefix
+		for(var i = 0; i < prefix.length; i++) {
+			processInput(prefix[i]);
+			while(againing) {
+				processInput(-1);
+			}
+		}
+		unregisterApplyAtWatcher(ruleApplied);
+		storedRuleCounts = null;
+		switchToSearchState(currentNode);
+		return retval;
+	}
 
 	function postSolution(currentNode, iter) {
+		var prefixes = FIRST_SOLUTION_ONLY ? [currentNode.firstPrefix] : prefixes(currentNode);
 		REPLY_FN("solution", {
 			level:LEVEL, 
 			solution:{
@@ -379,7 +408,8 @@ var Solver = (function() {
 				g:currentNode.g,
 				h:currentNode.h,
 				f:currentNode.f,
-				prefixes:FIRST_SOLUTION_ONLY ? [currentNode.firstPrefix] : prefixes(currentNode)
+				prefixes:prefixes,
+				ruleCounts:prefixes.map(function(p){ return getRuleCounts(currentNode, p)[LEVEL][Utilities.RC_CATEGORY_WIN]; })
 			}, 
 			iteration:iter,
 			time:timeSinceStart()

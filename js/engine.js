@@ -1830,15 +1830,41 @@ Rule.prototype.applyAt = function(delta,tuple,check) {
         }
     }
 
+	var ruleDirection = dirMaskName[rule.direction];
 	if (verbose_logging && result){
-		var ruleDirection = dirMaskName[rule.direction];
 		var logString = '<font color="green">Rule <a onclick="jumpToLine(' + rule.lineNumber + ');"  href="javascript:void(0);">' + rule.lineNumber + '</a> ' + 
 			ruleDirection + ' applied.</font>';
 		consolePrint(logString);
 	}
+	if(result && applyAtWatchers && applyAtWatchers.length) {
+		var ruleLoc = rule.getGroupAndRuleIndex();
+		for(var i = 0; i < applyAtWatchers.length; i++) {
+			applyAtWatchers[i](rule,ruleLoc.groupIndex,ruleLoc.ruleIndex,ruleDirection,tuple);
+		}
+	}
 
     return result;
 };
+
+//N.B.: For late rules, every group index is offset by state.rules.length.
+//      The group index can only be used to retrieve a rule group from the
+//      combined set of regular and late rule groups.
+Rule.prototype.getGroupAndRuleIndex = function() {
+	var rulei = -1;
+	for(var groupi = 0; groupi < state.rules.length; groupi++) {
+		rulei = state.rules[groupi].indexOf(this);
+		if(rulei != -1) {
+			return {groupIndex:groupi, ruleIndex:rulei};
+		}
+	}
+	for(groupi = 0; groupi < state.lateRules.length; groupi++) {
+		rulei = state.lateRules[groupi].indexOf(this);
+		if(rulei != -1) {
+			return {groupIndex:state.rules.length+groupi, ruleIndex:rulei};
+		}
+	}
+	return null;
+}
 
 Rule.prototype.tryApply = function() {
 	var delta = dirMasksDelta[this.direction];
@@ -2511,4 +2537,17 @@ function goToTitleScreen(){
 	generateTitleScreen();
 }
 
+var applyAtWatchers = [];
 
+function registerApplyAtWatcher(fn) {
+	if(applyAtWatchers.indexOf(fn) == -1) {
+		applyAtWatchers.push(fn);
+	}
+}
+
+function unregisterApplyAtWatcher(fn) {
+	var idx = applyAtWatchers.indexOf(fn);
+	if(idx != -1) {
+		applyAtWatchers.splice(idx,1);
+	}
+}

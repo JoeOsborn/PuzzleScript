@@ -1,31 +1,4 @@
 'use strict';
-//monkey-patch compile
-
-//Put a branch here for idempotence sake
-if(!this.hasOwnProperty("compileAndAnalyze") ||
-	 !this.compileAndAnalyze) {
-	console.log("patch compile");
-	var justCompile = compile;
-	var compileAndAnalyze = function(command,text,randomSeed) {
-		justCompile(command,text,randomSeed);
-		Analyzer.analyze(command,text,randomSeed);
-	}
-	compile = compileAndAnalyze;
-}
-
-if(!this.hasOwnProperty("setEditorAnalyzerClean") ||
-	 !this.setEditorAnalyzerClean) {
-	console.log("patch setEditorClean");
-	var justSetClean = setEditorClean;
-	var setEditorAnalyzerClean = function() {
-		justSetClean();
-		Analyzer.clear();
-	}
-	setEditorClean = setEditorAnalyzerClean;	
-}
-
-var code = window.form1.code;
-var editor = code ? code.editorreference : null;
 
 var Analyzer = (function() {
 	var module = {};
@@ -54,6 +27,27 @@ var Analyzer = (function() {
 	var seenSolutions = {};
 	var lastSeenSolutions = {};
 	
+	var analyzerRuleCountGutter = module.analyzerRuleCountGutter = "analyzer-rulecount";
+	var _ruleCountMode = 0;
+	function getRuleCountMode() {
+		return ruleCountModes[_ruleCountMode];
+	}
+	function switchToNextRuleCountMode() {
+		_ruleCountMode = (_ruleCountMode + 1) % ruleCountModes.length;
+		return getRuleCountMode();
+	}
+	var RC_MODE_INTERACTIVE = "rc-interactive";
+	var RC_MODE_THIS_LEVEL_WIN = "rc-this-level-win";
+	var RC_MODE_ALL_LEVELS_WIN = "rc-all-levels-win";
+	var RC_CATEGORY_WIN = Utilities.RC_CATEGORY_WIN;
+	var RC_CATEGORY_INTERACTIVE = Utilities.RC_CATEGORY_INTERACTIVE;
+	var storedRuleCounts = [];
+	var ruleCountModes = [
+		RC_MODE_INTERACTIVE,
+		RC_MODE_THIS_LEVEL_WIN,
+		RC_MODE_ALL_LEVELS_WIN
+	];
+
 	var lineHighlights = {};
 	var solvedClass = "line-editor-solved";
 	var unsolvedClass = "line-editor-unsolved";
@@ -71,8 +65,12 @@ var Analyzer = (function() {
 		"solve": "js/analyzer/worker_solve.js"
 	};
 	
+	registerApplyAtWatcher(ruleApplied);
+	consolePrint("The right-hand gutter is now showing counts of rules triggered by interactive play.");
+	
 	module.clear = function clear() {
 		clearLineHighlights();
+		clearRuleCountDisplay();
 		lastRules = "";
 		gameRules = "";
 		levelQueue = [];
@@ -100,7 +98,6 @@ var Analyzer = (function() {
 		console.log("analyze "+command+" with "+randomseed+" in "+curlevel);
 		if(gameRules != lastRules) {
 			var solvers = getAllWorkers("solve");
-			//TODO: if this is a different game, nuke seenSolutions
 			//kill stale workers.
 			//TODO: only kill them if their levels' texts have changed or if the rules have changed.
 			levelQueue = [];
@@ -113,6 +110,14 @@ var Analyzer = (function() {
 					curlevel = undefined;
 				}
 			}
+			for(var l = 0; l < state.levels.length; l++) {
+				if(!storedRuleCounts[l]) {
+					storedRuleCounts[l] = {};
+				}
+				if(!storedRuleCounts[l][RC_CATEGORY_INTERACTIVE]) {
+					storedRuleCounts[l][RC_CATEGORY_INTERACTIVE] = [];
+				}
+			}
 			levelQueue = createLevelQueue(true, curlevel !== undefined && curlevel > 0 ? [curlevel] : []);
 			consolePrint("Analyze levels:"+JSON.stringify(levelQueue));
 			tickLevelQueue(null);
@@ -121,6 +126,7 @@ var Analyzer = (function() {
 		} else {
 			consolePrint("Rules are unchanged. Skipping analysis.");
 		}
+		updateRuleCountDisplay();
 	}
 	
 	module.dumpHint = function dumpHint() {
@@ -195,6 +201,79 @@ var Analyzer = (function() {
 		}
 		return null;
 	}
+	
+	function clearRuleCountDisplay() {
+		editor.clearGutter(analyzerRuleCountGutter);
+	}
+	
+	var lineCounts = {};
+	function updateRuleCountDisplay() {
+		clearRuleCountDisplay();
+		var rules = state.rules ? state.rules.concat(state.lateRules) : [];
+		lineCounts = {};
+		for(var groupi = 0; groupi < rules.length; groupi++) {
+			for(var ri = 0; ri < rules[groupi].length; ri++) {
+				var line = rules[groupi][ri].lineNumber-1;
+				if(!lineCounts[line]) {
+					lineCounts[line] = 0;
+				}
+				lineCounts[line] += getRuleCounts(groupi,ri);
+			}
+		}
+		for(var l in lineCounts) {
+			var marker = document.createElement("div");
+			marker.innerHTML = ""+lineCounts[l];
+			editor.setGutterMarker(parseInt(l), analyzerRuleCountGutter, marker);
+		}
+	}
+		
+	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
+		Utilities.incrementRuleCount(storedRuleCounts,curlevel,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
+		if(getRuleCountMode() == RC_MODE_INTERACTIVE) {
+			var l = rule.lineNumber-1;
+			if(!lineCounts[l]) {
+				lineCounts[l] = 1;
+				var marker = document.createElement("div");
+				marker.innerHTML = "1";
+				editor.setGutterMarker(l, analyzerRuleCountGutter, marker);
+			} else {
+				lineCounts[l]++;
+				var existingMarkers = editor.lineInfo(l).gutterMarkers;
+				if(existingMarkers && existingMarkers[analyzerRuleCountGutter]) {
+					existingMarkers[analyzerRuleCountGutter].innerHTML = ""+lineCounts[l];
+				}
+			}
+		}
+	}
+	
+	function getRuleCounts(ruleGroup,ruleIndex) {
+		var count = 0;
+		switch(getRuleCountMode()) {
+			case RC_MODE_ALL_LEVELS_WIN:
+				for(var l = 0; l < state.levels.length; l++) {
+					count += Utilities.getEntry(storedRuleCounts,l,RC_CATEGORY_WIN,ruleGroup,ruleIndex);
+				}
+				return count;
+			case RC_MODE_THIS_LEVEL_WIN:
+				count += Utilities.getEntry(storedRuleCounts,curlevel,RC_CATEGORY_WIN,ruleGroup,ruleIndex);
+				return count;
+			case RC_MODE_INTERACTIVE:
+				for(var l = 0; l < state.levels.length; l++) {
+					count += Utilities.getEntry(storedRuleCounts,l,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
+				}
+				return count;
+		}
+	}
+	
+	module.onEditorGutterClick = function onEditorGutterClick(cm, n) {
+		clearRuleCountDisplay();
+		var mode = switchToNextRuleCountMode();
+		updateRuleCountDisplay();
+		consolePrint("The right-hand gutter is now showing counts of rules triggered by "+
+		 (mode == RC_MODE_INTERACTIVE ? "interactive play" :
+		  (mode == RC_MODE_THIS_LEVEL_WIN ? "the winning moves of the current level" : 
+		  (mode == RC_MODE_ALL_LEVELS_WIN ? "the winning moves of all levels" : "<<undef>>")))+".");
+	};
 	
 	function clearLineHighlights() {
 		console.log("Clear line highlights "+JSON.stringify(lineHighlights));
@@ -599,7 +678,9 @@ var Analyzer = (function() {
 			seenSolutions[level].steps = seenSolutions[level].steps.concat(soln.prefixes.map(prefixToSolutionSteps));
 			seenSolutions[level].exhaustive = data.queueLength == 0;
 		}
+		storedRuleCounts[data.level][RC_CATEGORY_WIN] = soln.ruleCounts[0];
 		updateLevelHighlights();
+		updateRuleCountDisplay();
 		return seenSolutions[level];
 	}
 

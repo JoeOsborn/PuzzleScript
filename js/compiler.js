@@ -2544,6 +2544,10 @@ function compile(command,text,randomseed) {
 	clearInputHistory();
 
 	consoleCacheDump();
+	
+	if(window && window.Analyzer) {
+		window.Analyzer.analyze(command,text,randomseed);
+	}
 }
 
 

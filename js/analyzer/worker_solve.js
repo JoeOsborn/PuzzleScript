@@ -1,5 +1,6 @@
 importScripts(
-	"worker_utils.js"
+	"worker_utils.js",
+    "utilities.js"
 );
 
 importScripts(

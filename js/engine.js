@@ -498,7 +498,8 @@ function backupLevel() {
 	var ret = {
 		dat : new Int32Array(level.objects),
 		width : level.width,
-		height : level.height
+		height : level.height,
+		oldflickscreendat: oldflickscreendat.slice()
 	};
 	return ret;
 }
@@ -732,8 +733,7 @@ function RebuildLevelArrays() {
 
 var messagetext="";
 function restoreLevel(lev) {
-	if(!oldflickscreendat) { oldflickscreendat=[]; }
-	else { oldflickscreendat.length = 0; }
+	oldflickscreendat=lev.oldflickscreendat.slice();
 
 	level.objects = new Int32Array(lev.dat);
 	if (level.width !== lev.width || level.height !== lev.height) {
@@ -764,7 +764,6 @@ function restoreLevel(lev) {
 	}
 
     againing=false;
-    messagetext="";
     if(!level.commandQueue) { level.commandQueue=[]; }
     else { level.commandQueue.length = 0; }
 }
@@ -1070,7 +1069,7 @@ BitVec.prototype.ishiftor = function(mask, shift) {
 	var low = mask << toshift;
 	this.data[shift>>5] |= low;
 	if (toshift) {
-		high = mask >> (32 - toshift);
+		var high = mask >> (32 - toshift);
 		this.data[(shift>>5)+1] |= high;
 	}
 }
@@ -1409,7 +1408,7 @@ CellPattern.prototype.replace = function(rule, currentIndex) {
 		curRigidGroupIndexMask = level.rigidGroupIndexMask[currentIndex] || new BitVec(STRIDE_MOV);
 		curRigidMovementAppliedMask = level.rigidMovementAppliedMask[currentIndex] || new BitVec(STRIDE_MOV);
 
-		if (!rigidMask.bitsSetInArray(curRigidGroupIndexMask.data) || 
+		if (!rigidMask.bitsSetInArray(curRigidGroupIndexMask.data) &&
 			!replace.movementsLayerMask.bitsSetInArray(curRigidMovementAppliedMask.data) ) {
 			curRigidGroupIndexMask.ior(rigidMask);
 			curRigidMovementAppliedMask.ior(replace.movementsLayerMask);
@@ -1988,7 +1987,7 @@ function applyRuleGroup(ruleGroup) {
     return loopPropagated;
 }
 
-function applyRules(rules, loopPoint, startRuleGroupindex){
+function applyRules(rules, loopPoint, startRuleGroupindex, bannedGroup){
     //for each rule
     //try to match it
 
@@ -1996,7 +1995,7 @@ function applyRules(rules, loopPoint, startRuleGroupindex){
     var loopPropagated = startRuleGroupindex>0;
     var loopCount = 0;
     for (var ruleGroupIndex=startRuleGroupindex;ruleGroupIndex<rules.length;) {
-    	if (level.bannedGroup[ruleGroupIndex]) {
+    	if (bannedGroup && bannedGroup[ruleGroupIndex]) {
     		//do nothing
     	} else {
     		var ruleGroup=rules[ruleGroupIndex];
@@ -2191,16 +2190,15 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 
 		calculateRowColMasks();
 
-        while (first || rigidloop/*||(anyMovements()&& (i<50))*/) {
+        do {
         //not particularly elegant, but it'll do for now - should copy the world state and check
         //after each iteration
-        	first=false;
         	rigidloop=false;
         	i++;
         	
         	if (verbose_logging){consolePrint('applying rules');}
 
-        	applyRules(state.rules, state.loopPoint, startRuleGroupIndex);	
+        	applyRules(state.rules, state.loopPoint, startRuleGroupIndex, level.bannedGroup);
         	var shouldUndo = resolveMovements();
 
         	if (shouldUndo) {
@@ -2215,7 +2213,7 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
         		applyRules(state.lateRules, state.lateLoopPoint, 0);
         		startRuleGroupIndex=0;
         	}
-        }
+        } while (i < 50 && rigidloop);
 
         if (i>=50) {
         	consolePrint("looped through 50 times, gave up.  too many loops!");
@@ -2346,8 +2344,8 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 
 		    if (level.commandQueue.indexOf('again')>=0 && modified) {
 		    	//first have to verify that something's changed
-		    	var oldmessagetext = messagetext;
 		    	var old_verbose_logging=verbose_logging;
+		    	var oldmessagetext = messagetext;
 		    	verbose_logging=false;
 		    	if (processInput(-1,true,true)) {
 			    	verbose_logging=old_verbose_logging;
@@ -2365,9 +2363,7 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 					}
 			    }
 			    verbose_logging=old_verbose_logging;
-
 			    messagetext = oldmessagetext;
-			    verbose_logging=old_verbose_logging;
 		    }   
 		}
 		    

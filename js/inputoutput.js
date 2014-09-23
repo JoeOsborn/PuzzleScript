@@ -687,7 +687,7 @@ function update() {
         }
     }
     if (againing) {
-        if (timer>againinterval) {
+        if (timer>againinterval&&messagetext.length==0) {
             if (processInput(-1)) {
                 redraw();
                 keyRepeatTimer=0;
@@ -729,7 +729,7 @@ function update() {
 	    }
 	}
 
-    if (autotickinterval>0&&!textMode&&!levelEditorOpened&&!againing) {
+    if (autotickinterval>0&&!textMode&&!levelEditorOpened&&!againing&&!winning) {
         autotick+=deltatime;
         if (autotick>autotickinterval) {
             autotick=0;

@@ -367,7 +367,6 @@ function canvasResize() {
 	}
 
     if (textMode) {
-    	levelEditorOpened=false;
         screenwidth=titleWidth;
         screenheight=titleHeight;
     }
@@ -402,7 +401,7 @@ function canvasResize() {
     }
     magnification = ((cellwidth/w)*5)|0;
 
-    if (levelEditorOpened) {
+    if (levelEditorOpened && !textMode) {
     	xoffset+=cellwidth;
     	yoffset+=cellheight*(1+editorRowCount);
     }

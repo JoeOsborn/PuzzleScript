@@ -1,3 +1,10 @@
+function memTestClick() {
+	clearConsole();
+	if(window.Analyzer) { window.Analyzer.mode = window.Analyzer.MODE_MEM_TEST; }
+	compile(["restart"]);
+	if(window.Analyzer) { window.Analyzer.mode = window.Analyzer.MODE_NORMAL; }
+}
+
 function runClick() {
 	clearConsole();
 	compile(["restart"]);

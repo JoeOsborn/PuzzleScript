@@ -86,9 +86,7 @@ var Solver = (function() {
 		}
 		START_TIME = performance.now();
 
-		if(scope.hasOwnProperty("justCompile")) {
-			justCompile(["loadLevel", LEVEL], RULES, SEED);
-		} else {
+		if(!window) {
 			compile(["loadLevel", LEVEL], RULES, SEED);
 		}
 		
@@ -107,11 +105,11 @@ var Solver = (function() {
 		}
 
 		ACTIONS = [UP, DOWN, LEFT, RIGHT];
-		if(autotickinterval > 0) {
-			ACTIONS.push(WAIT);
-		}
 		if(!('noaction' in state.metadata)) {
 			ACTIONS.push(ACTION);
+		}
+		if(autotickinterval > 0) {
+			ACTIONS.push(WAIT);
 		}
 
 		open = initSet();

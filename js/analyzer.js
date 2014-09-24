@@ -3,6 +3,11 @@
 var Analyzer = (function() {
 	var module = {};
 	
+	module.MODE_NORMAL = "MODE_NORMAL";
+	module.MODE_MEM_TEST = "MODE_MEM_TEST";
+	
+	module.mode = module.MODE_NORMAL;
+	
 	var USE_WORKERS = true;
 	var INPUT_MAPPING = {};
 	INPUT_MAPPING[-1]="WAIT";
@@ -62,7 +67,8 @@ var Analyzer = (function() {
 	var workers = [];
 	var workerLookup = {};
 	var workerScripts = {
-		"solve": "js/analyzer/worker_solve.js"
+		"solve": "js/analyzer/worker_solve.js",
+		"memorytest": "js/analyzer/worker_memorytest.js"
 	};
 	
 	registerApplyAtWatcher(ruleApplied);
@@ -96,14 +102,22 @@ var Analyzer = (function() {
 		}
 		gameRules = text;
 		console.log("analyze "+command+" with "+randomseed+" in "+curlevel);
-		if(gameRules != lastRules) {
-			var solvers = getAllWorkers("solve");
-			//kill stale workers.
-			//TODO: only kill them if their levels' texts have changed or if the rules have changed.
+		if(module.mode == module.MODE_MEM_TEST) {
+			killAllWorkers();
 			levelQueue = [];
-			for(var i = 0; i < solvers.length; i++) {
-				killWorker("solve", solvers[i].key);
+			if(curlevel) {
+				curlevel = parseInt(curlevel);
+				if(isNaN(curlevel)) {
+					curlevel = undefined;
+				}
 			}
+			runMemoryTest(null);
+			return;
+		}
+		if(gameRules != lastRules) {
+			//TODO: only kill them if their levels' texts have changed or if the rules have changed.
+			killAllWorkers();
+			levelQueue = [];
 			if(curlevel) {
 				curlevel = parseInt(curlevel);
 				if(isNaN(curlevel)) {
@@ -228,6 +242,7 @@ var Analyzer = (function() {
 	}
 		
 	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
+		if(module.mode != module.MODE_NORMAL) { return; }
 		Utilities.incrementRuleCount(storedRuleCounts,curlevel,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
 		if(getRuleCountMode() == RC_MODE_INTERACTIVE) {
 			var l = rule.lineNumber-1;
@@ -507,6 +522,27 @@ var Analyzer = (function() {
 		}
 	}
 	
+	function runMemoryTest(wkr) {
+		var lev = curlevel;
+		var level = state.levels[lev];
+		var hint = levelHint(lev);
+		if(USE_WORKERS) {
+			startWorker("memorytest", lev, {
+				rules:gameRules,
+				level:lev
+			}, handleMemoryTest);
+		} else {
+			MemoryTest.startTest({
+				rules:gameRules,
+				level:lev,
+				replyFn:function(type,msg) {
+					console.log("MSG:"+type+":"+JSON.stringify(msg));
+					handleMemoryTest(lev,type,msg);
+				}
+			});
+		}
+	}
+	
 	function prefixToSolutionSteps(p) {
 		return p.map(
 			function(d){return INPUT_MAPPING[d];}
@@ -655,6 +691,10 @@ var Analyzer = (function() {
 				break;
 		}
 	}
+
+	function handleMemoryTest(id,type,data) {
+		consolePrint("MemTest:"+type+":"+JSON.stringify(data));
+	}
 	
 	//Add a solution to seenSolutions[lev], unless it's stale in which case clobber it and wait for more.
 	function recordSolution(ruleText, levelText, data) {
@@ -711,6 +751,19 @@ var Analyzer = (function() {
 		workers[w.id] = null;
 		delete workerLookup[type][key];
 		return w;
+	}
+	
+	function killAllWorkers(type /* : optional */) {
+		if(type) {
+			var ws = getAllWorkers(type);
+			for(var i = 0; i < ws.length; i++) {
+				killWorker(type, ws[i].key);
+			}
+		} else {
+			for(var t in workerLookup) {
+				killAllWorkers(t);
+			}
+		}
 	}
 
 	function getWorker(type,key,require) {

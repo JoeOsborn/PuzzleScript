@@ -1713,6 +1713,7 @@ function generateRigidGroupList(state) {
 	var groupNumber_to_GroupIndex=[];
 	var groupNumber_to_RigidGroupIndex=[];
 	var rigidGroups=[];
+	var anyRigidFound = false;
 	for (var i=0;i<state.rules.length;i++) {
 		var ruleset=state.rules[i];
 		var rigidFound=false;
@@ -1720,6 +1721,7 @@ function generateRigidGroupList(state) {
 			var rule=ruleset[j];
 			if (rule.isRigid) {
 				rigidFound=true;
+				anyRigidFound = true;
 			}
 		}
 		rigidGroups[i]=rigidFound;
@@ -1740,6 +1742,7 @@ function generateRigidGroupList(state) {
 	state.rigidGroupIndex_to_GroupIndex=rigidGroupIndex_to_GroupIndex;
 	state.groupNumber_to_RigidGroupIndex=groupNumber_to_RigidGroupIndex;
 	state.groupIndex_to_RigidGroupIndex=groupIndex_to_RigidGroupIndex;
+	state.hasRigidGroups = anyRigidFound;
 }
 
 function getMaskFromName(state,name) {

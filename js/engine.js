@@ -499,7 +499,7 @@ function backupLevel() {
 		dat : new Int32Array(level.objects),
 		width : level.width,
 		height : level.height,
-		oldflickscreendat: oldflickscreendat.slice()
+		oldflickscreendat: oldflickscreendat ? oldflickscreendat.slice() : []
 	};
 	return ret;
 }
@@ -733,9 +733,11 @@ function RebuildLevelArrays() {
 
 var messagetext="";
 function restoreLevel(lev) {
-	oldflickscreendat=lev.oldflickscreendat.slice();
-
-	level.objects = new Int32Array(lev.dat);
+	if(level.objects.length != lev.dat.length) {
+		level.objects = new Int32Array(lev.dat);
+	} else {
+		level.objects.set(lev.dat);
+	}
 	if (level.width !== lev.width || level.height !== lev.height) {
 		level.width = lev.width;
 		level.height = lev.height;
@@ -813,37 +815,51 @@ function DoUndo(force) {
 	}
 }
 
-function getPlayerPositions(positions) {
+function getFirstPlayerPosition(positions) {
     var playerMask = state.playerMask;
-    for (i=0;i<level.n_tiles;i++) {
+    for (var i=0;i<level.n_tiles;i++) {
         level.getCellInto(i,_o11);
         if (playerMask.anyBitsInCommon(_o11)) {
-            positions.push(i);
+            return i;
         }
     }
+		return -1;
+}
+
+function getPlayerPositions(positions) {
+    var playerMask = state.playerMask;
+		playerPositionCount = 0;
+    for (var i=0;i<level.n_tiles;i++) {
+        level.getCellInto(i,_o11);
+        if (playerMask.anyBitsInCommon(_o11)) {
+            positions[playerPositionCount] = i;
+						playerPositionCount++;
+        }
+    }
+		return playerPositionCount;
 }
 
 function getLayersOfMask(cellMask,layers) {
-    layers=layers || [];
+		var count = 0;
     for (var i=0;i<state.objectCount;i++) {
         if (cellMask.get(i)) {
             var n = state.idDict[i];
             var o = state.objects[n];
-            layers.push(o.layer)
+            layers[count] = o.layer;
+						count++;
         }
     }
-    return layers;
+    return count;
 }
 
 var _tempMoveLayers = [];
 function moveEntitiesAtIndex(positionIndex, entityMask, dirMask) {
     var cellMask = level.getCellInto(positionIndex,_o12);
     cellMask.iand(entityMask);
-    _tempMoveLayers.length = 0;
-    getLayersOfMask(cellMask,_tempMoveLayers);
+    var layerCount = getLayersOfMask(cellMask,_tempMoveLayers);
 
     var movementMask = level.getMovements(positionIndex);
-    for (var i=0;i<_tempMoveLayers.length;i++) {
+    for (var i=0;i<layerCount;i++) {
     	movementMask.ishiftor(dirMask, 5 * _tempMoveLayers[i]);
     }
     level.setMovements(positionIndex, movementMask);
@@ -853,7 +869,7 @@ function moveEntitiesAtIndex(positionIndex, entityMask, dirMask) {
 function startMovement(dir,positions) {
 	var movedany=false;
     getPlayerPositions(positions);
-    for (var i=0;i<playerPositions.length;i++) {
+    for (var i=0;i<playerPositionCount;i++) {
         var playerPosIndex = playerPositions[i];
         moveEntitiesAtIndex(playerPosIndex,state.playerMask,dir);
     }
@@ -1142,8 +1158,10 @@ function Rule(rule) {
 	this.isRandom = rule[8];
 	this.cellRowMasks = rule[9];
 	this.cellRowMatches = [];
+	this.foundMatches = [];
 	for (var i=0;i<this.patterns.length;i++) {
 		this.cellRowMatches.push(this.generateCellRowMatchesFunction(this.patterns[i],this.isEllipsis[i]));
+		this.foundMatches.push([]);
 	}
 	/* TODO: eliminate isRigid, groupNumber, isRandom
 	from this class by moving them up into a RuleGroup class */
@@ -1188,7 +1206,7 @@ Rule.prototype.generateCellRowMatchesFunction = function(cellRow,hasEllipsis)  {
 
 
 		var fn = "var d = "+d1+"+"+d0+"*level.height;\n";
-		fn += "var result = [];\n"
+		fn += "var result = [];\n" //ALLOC
 		fn += "if(cellRow[0].matches(i)";
 		var cellIndex=1;
 		for (;cellRow[cellIndex]!==ellipsisPattern;cellIndex++) {
@@ -1342,6 +1360,7 @@ CellPattern.prototype.toJSON = function() {
 var _o1,_o2,_o2_5,_o3,_o4,_o5,_o6,_o7,_o8,_o9,_o10,_o11,_o12;
 var _m1,_m2,_m3;
 
+var _replaceChoices = [];
 CellPattern.prototype.replace = function(rule, currentIndex) {
 	var replace = this.replacement;
 
@@ -1360,7 +1379,8 @@ CellPattern.prototype.replace = function(rule, currentIndex) {
 	movementsClear.ior(replace.movementsLayerMask);
 
 	if (!replace_RandomEntityMask.iszero()) {
-		var choices=[];
+		var choices=_replaceChoices;
+		choices.length = 0;
 		for (var i=0;i<32*STRIDE_OBJ;i++) {
 			if (replace_RandomEntityMask.get(i)) {
 				choices.push(i);
@@ -1551,9 +1571,7 @@ function DoesCellRowMatch(direction,cellRow,i,k) {
     return false;
 }
 
-function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask) {	
-	var result=[];
-	
+function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask, result) {	
 	if ((!cellRowMask.bitsSetInArray(level.mapCellContents.data))) {
 		return result;
 	}
@@ -1627,8 +1645,7 @@ function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask) {
 }
 
 
-function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask) {
-	var result=[];
+function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask,result) {
 	if ((!cellRowMask.bitsSetInArray(level.mapCellContents.data))) {
 		return result;
 	}
@@ -1715,12 +1732,12 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask) {
 }
 
 function generateTuples(lists) {
-    var tuples=[[]];
+    var tuples=[[]]; //ALLOC
 
     for (var i=0;i<lists.length;i++)
     {
         var row = lists[i];
-        var newtuples=[];
+        var newtuples=[]; //ALLOC
         for (var j=0;j<row.length;j++) {
             var valtoappend = row[j];
             for (var k=0;k<tuples.length;k++) {
@@ -1737,43 +1754,63 @@ function generateTuples(lists) {
 var rigidBackups=[]
 
 function commitPreservationState(ruleGroupIndex) {
-	var propagationState = {
-		ruleGroupIndex:ruleGroupIndex,
-		//don't need to know the tuple index
-		objects:new Int32Array(level.objects),
-		movements:new Int32Array(level.movements),
-		rigidGroupIndexMask:level.rigidGroupIndexMask.slice(),
-		rigidMovementAppliedMask:level.rigidMovementAppliedMask.slice(),
-		bannedGroup:level.bannedGroup.slice()
-	};
-	rigidBackups[ruleGroupIndex]=propagationState;
+	var propagationState;
+	if(!rigidBackups[ruleGroupIndex]) {
+		propagationState = {
+				ruleGroupIndex:ruleGroupIndex,
+				//don't need to know the tuple index
+				objects:new Int32Array(level.objects),
+				movements:new Int32Array(level.movements),
+				rigidGroupIndexMask:level.rigidGroupIndexMask.slice(),
+				rigidMovementAppliedMask:level.rigidMovementAppliedMask.slice(),
+				bannedGroup:level.bannedGroup.slice()
+		};
+		rigidBackups[ruleGroupIndex]=propagationState;
+	} else {
+		propagationState = rigidBackups[ruleGroupIndex];
+		if(propagationState.objects.length != level.objects.length) {
+			propagationState.objects.length = new Int32Array(level.objects);
+		} else {
+			propagationState.objects.set(level.objects);
+		}
+		if(propagationState.movements.length != level.movements.length) {
+			propagationState.movements.length = new Int32Array(level.movements);
+		} else {
+			propagationState.movements.set(level.movements);
+		}
+		propagationState.rigidGroupIndexMask = level.rigidGroupIndexMask.slice(); //ALLOC
+		propagationState.rigidMovementAppliedMask = level.rigidMovementAppliedMask.slice(); //ALLOC
+		bannedGroup = level.bannedGroup.slice(); //ALLOC
+	}
 	return propagationState;
 }
 
 function restorePreservationState(preservationState) {
 //don't need to concat or anythign here, once something is restored it won't be used again.
-	level.objects = new Int32Array(preservationState.objects);
-	level.movements = new Int32Array(preservationState.movements);
-	level.rigidGroupIndexMask = preservationState.rigidGroupIndexMask.slice();
-    level.rigidMovementAppliedMask = preservationState.rigidMovementAppliedMask.slice();
+	level.objects.set(preservationState.objects);
+	level.movements.set(preservationState.movements);
+	level.rigidGroupIndexMask = preservationState.rigidGroupIndexMask;
+    level.rigidMovementAppliedMask = preservationState.rigidMovementAppliedMask;
     sfxCreateMask=new BitVec(STRIDE_OBJ);
     sfxDestroyMask=new BitVec(STRIDE_OBJ);
 //	rigidBackups = preservationState.rigidBackups;
 }
 
-Rule.prototype.findMatches = function() {
-	var matches=[];
+var _emptyArray = [];
+Rule.prototype.findMatches = function(matches) {
+	matches.length = 0;
 	var cellRowMasks=this.cellRowMasks;
     for (var cellRowIndex=0;cellRowIndex<this.patterns.length;cellRowIndex++) {
+        this.foundMatches[cellRowIndex].length = 0;
         var cellRow = this.patterns[cellRowIndex];
         var matchFunction = this.cellRowMatches[cellRowIndex];
         if (this.isEllipsis[cellRowIndex]) {//if ellipsis     
-        	var match = matchCellRowWildCard(this.direction,matchFunction,cellRow,cellRowMasks[cellRowIndex]);  
+        	var match = matchCellRowWildCard(this.direction,matchFunction,cellRow,cellRowMasks[cellRowIndex],this.foundMatches[cellRowIndex]);  
         } else {
-        	var match = matchCellRow(this.direction,matchFunction,cellRow,cellRowMasks[cellRowIndex]);               	
+        	var match = matchCellRow(this.direction,matchFunction,cellRow,cellRowMasks[cellRowIndex],this.foundMatches[cellRowIndex]);
         }
         if (match.length===0) {
-            return [];
+            return _emptyArray;
         } else {
             matches.push(match);
         }
@@ -1865,11 +1902,12 @@ Rule.prototype.getGroupAndRuleIndex = function() {
 	return null;
 }
 
+var _applyMatches = [];
 Rule.prototype.tryApply = function() {
 	var delta = dirMasksDelta[this.direction];
 
     //get all cellrow matches
-    var matches = this.findMatches();
+    var matches = this.findMatches(_applyMatches);
     if (matches.length===0) {
     	return false;
     }
@@ -1925,18 +1963,20 @@ function showTempMessage() {
 	canvasResize();
 }
 
+var _randomMatches = [];
 function applyRandomRuleGroup(ruleGroup) {
 	var propagated=false;
 
-	var matches=[];
+	_randomMatches.length = 0;
+	var matches = _randomMatches;
 	for (var ruleIndex=0;ruleIndex<ruleGroup.length;ruleIndex++) {
 		var rule=ruleGroup[ruleIndex];
-		var ruleMatches = rule.findMatches();
+		var ruleMatches = rule.findMatches(_applyMatches);
 		if (ruleMatches.length>0) {
 	    	var tuples  = generateTuples(ruleMatches);
 	    	for (var j=0;j<tuples.length;j++) {
 	    		var tuple=tuples[j];
-				matches.push([ruleIndex,tuple]);
+				matches.push([ruleIndex,tuple]); //ALLOC
 	    	}
 		}		
 	}
@@ -2116,6 +2156,7 @@ function calculateRowColMasks() {
 }
 
 var playerPositions = [];
+var playerPositionCount = 0;
 
 /* returns a bool indicating if anything changed */
 function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
@@ -2137,7 +2178,6 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
 		bak = backupLevel(); 
 	}
 
-	playerPositions.length = 0;
     if (dir<=4) {
     	if (dir>=0) {
 	        switch(dir){
@@ -2173,14 +2213,13 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
         var i=0;
         var first=true;
         level.bannedGroup.length = 0;
-        rigidBackups.length = 0;
         level.commandQueue.length = 0;
         var startRuleGroupIndex=0;
         var rigidloop=false;
         //We know that shouldUndo (down in the while(first || rigidloop) loop) will only ever
         // be true if resolveMovements returns true, which will only return true in the presence
         // of rigidbody rules. So, there's no point making a copy of the level that will never be used!
-        var startState = state.rigidGroups.length > 0 ? commitPreservationState() : null;
+        var startState = state.hasRigidGroups ? commitPreservationState() : null;
 	    messagetext="";
 	    sfxCreateMask.setZero();
 	    sfxDestroyMask.setZero();
@@ -2220,9 +2259,9 @@ function processInput(dir,dontCheckWin,dontModify,premadeBackup) {
         }
 
 
-        if (playerPositions.length>0 && state.metadata.require_player_movement!==undefined) {
+        if (playerPositionCount>0 && state.metadata.require_player_movement!==undefined) {
         	var somemoved=false;
-        	for (var i=0;i<playerPositions.length;i++) {
+        	for (var i=0;i<playerPositionCount;i++) {
         		var pos = playerPositions[i];
         		var val = level.getCellInto(pos,_o12);
         		if (state.playerMask.bitsClearInArray(val.data)) {

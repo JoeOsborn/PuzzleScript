@@ -2066,242 +2066,239 @@ function processInput(dir,dontCheckWin,dontModify) {
 	againing = false;
 
 	if (verbose_logging) { 
-	 	if (dir===-1) {
-	 		consolePrint('Turn starts with no input.')
-	 	} else {
-	 		consolePrint('=======================');
+		if (dir===-1) {
+			consolePrint('Turn starts with no input.')
+		} else {
+			consolePrint('=======================');
 			consolePrint('Turn starts with input of ' + ['up','left','down','right','action'][dir]+'.');
-	 	}
+		}
 	}
 
 	var bak = backupLevel();
 
 	var playerPositions=[];
-    if (dir<=4) {
-    	if (dir>=0) {
-	        switch(dir){
-	            case 0://up
-	            {
-	                dir=parseInt('00001', 2);;
-	                break;
-	            }
-	            case 1://left
-	            {
-	                dir=parseInt('00100', 2);;
-	                break;
-	            }
-	            case 2://down
-	            {
-	                dir=parseInt('00010', 2);;
-	                break;
-	            }
-	            case 3://right
-	            {
-	                dir=parseInt('01000', 2);;
-	                break;
-	            }
-	            case 4://action
-	            {
-	                dir=parseInt('10000', 2);;
-	                break;
-	            }
-	        }
-	        playerPositions = startMovement(dir);
+	if (dir<=4) {
+		if (dir>=0) {
+			switch(dir){
+				case 0://up
+				{
+					dir=parseInt('00001', 2);;
+					break;
+				}
+				case 1://left
+				{
+					dir=parseInt('00100', 2);;
+					break;
+				}
+				case 2://down
+				{
+					dir=parseInt('00010', 2);;
+					break;
+				}
+				case 3://right
+				{
+					dir=parseInt('01000', 2);;
+					break;
+				}
+				case 4://action
+				{
+					dir=parseInt('10000', 2);;
+					break;
+				}
+			}
+			playerPositions = startMovement(dir);
 		}
 
-        var i=0;
-        level.bannedGroup = [];
-        rigidBackups = [];
-        level.commandQueue=[];
-        var startRuleGroupIndex=0;
-        var rigidloop=false;
-        var startState = commitPreservationState();
-	    sfxCreateMask=new BitVec(STRIDE_OBJ);
-	    sfxDestroyMask=new BitVec(STRIDE_OBJ);
+		var i=0;
+		level.bannedGroup = [];
+		rigidBackups = [];
+		level.commandQueue=[];
+		var startRuleGroupIndex=0;
+		var rigidloop=false;
+		var startState = commitPreservationState();
+		sfxCreateMask=new BitVec(STRIDE_OBJ);
+		sfxDestroyMask=new BitVec(STRIDE_OBJ);
 
 		seedsToPlay_CanMove=[];
 		seedsToPlay_CantMove=[];
 
 		calculateRowColMasks();
 
-        do {
-        //not particularly elegant, but it'll do for now - should copy the world state and check
-        //after each iteration
-        	rigidloop=false;
-        	i++;
-        	
-        	if (verbose_logging){consolePrint('applying rules');}
+		do {
+		//not particularly elegant, but it'll do for now - should copy the world state and check
+		//after each iteration
+			rigidloop=false;
+			i++;
+			
+			if (verbose_logging){consolePrint('applying rules');}
 
-        	applyRules(state.rules, state.loopPoint, startRuleGroupIndex, level.bannedGroup);
-        	var shouldUndo = resolveMovements();
+			applyRules(state.rules, state.loopPoint, startRuleGroupIndex, level.bannedGroup);
+			var shouldUndo = resolveMovements();
 
-        	if (shouldUndo) {
-        		rigidloop=true;
-        		restorePreservationState(startState);
-        		startRuleGroupIndex=0;//rigidGroupUndoDat.ruleGroupIndex+1;
-        	} else {
-        		if (verbose_logging){consolePrint('applying late rules');}
-        		applyRules(state.lateRules, state.lateLoopPoint, 0);
-        		startRuleGroupIndex=0;
-        	}
-        } while (i < 50 && rigidloop);
-
-        if (i>=50) {
-            consolePrint("looped through 50 times, gave up.  too many loops!");
-        }
-
-
-        if (playerPositions.length>0 && state.metadata.require_player_movement!==undefined) {
-        	var somemoved=false;
-        	for (var i=0;i<playerPositions.length;i++) {
-        		var pos = playerPositions[i];
-        		var val = level.getCell(pos);
-        		if (state.playerMask.bitsClearInArray(val.data)) {
-        			somemoved=true;
-        			break;
-        		}
-        	}
-        	if (somemoved===false) {
-        		if (verbose_logging){
-	    			consolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
-	    			consoleCacheDump();
-        		}
-        		backups.push(bak);
-        		DoUndo(true);
-        		return false;
-        	}
-        	//play player cantmove sounds here
-        }
-
-	    if (level.commandQueue.indexOf('cancel')>=0) {	
-	    	if (verbose_logging) { 
-	    		consolePrint('CANCEL command executed, cancelling turn.');
-	    		consoleCacheDump();
+			if (shouldUndo) {
+				rigidloop=true;
+				restorePreservationState(startState);
+				startRuleGroupIndex=0;//rigidGroupUndoDat.ruleGroupIndex+1;
+			} else {
+				if (verbose_logging){consolePrint('applying late rules');}
+				applyRules(state.lateRules, state.lateLoopPoint, 0);
+				startRuleGroupIndex=0;
 			}
-    		backups.push(bak);
-    		DoUndo(true);
-    		return false;
-	    } 
+		} while (i < 50 && rigidloop);
 
-	    if (level.commandQueue.indexOf('restart')>=0) {
-	    	if (verbose_logging) { 
-	    		consolePrint('RESTART command executed, reverting to restart state.');
-	    		consoleCacheDump();
+		if (i>=50) {
+			consolePrint("looped through 50 times, gave up.	 too many loops!");
+		}
+
+
+		if (playerPositions.length>0 && state.metadata.require_player_movement!==undefined) {
+			var somemoved=false;
+			for (var i=0;i<playerPositions.length;i++) {
+				var pos = playerPositions[i];
+				var val = level.getCell(pos);
+				if (state.playerMask.bitsClearInArray(val.data)) {
+					somemoved=true;
+					break;
+				}
 			}
-    		backups.push(bak);
-	    	DoRestart(true);
-    		return true;
-	    } 
+			if (somemoved===false) {
+				if (verbose_logging){
+					consolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
+					consoleCacheDump();
+				}
+				backups.push(bak);
+				DoUndo(true);
+				return false;
+			}
+			//play player cantmove sounds here
+		}
 
-	    if (dontModify && level.commandQueue.indexOf('win')>=0) {
-	    	return true;
-	    }
-	    
-        var modified=false;
-	    for (var i=0;i<level.objects.length;i++) {
-	    	if (level.objects[i]!==bak.dat[i]) {
+		if (level.commandQueue.indexOf('cancel')>=0) {	
+			if (verbose_logging) { 
+				consolePrint('CANCEL command executed, cancelling turn.');
+				consoleCacheDump();
+			}
+			backups.push(bak);
+			DoUndo(true);
+			return false;
+		} 
+
+		if (level.commandQueue.indexOf('restart')>=0) {
+			if (verbose_logging) { 
+				consolePrint('RESTART command executed, reverting to restart state.');
+				consoleCacheDump();
+			}
+			backups.push(bak);
+			DoRestart(true);
+			return true;
+		} 
+
+		if (dontModify && level.commandQueue.indexOf('win')>=0) {
+			return true;
+		}
+		
+		var modified=false;
+		for (var i=0;i<level.objects.length;i++) {
+			if (level.objects[i]!==bak.dat[i]) {
 				if (dontModify) {
-	        		if (verbose_logging) {
-	        			consoleCacheDump();
-	        		}
-	        		backups.push(bak);
-	        		DoUndo(true);
+					if (verbose_logging) {
+						consoleCacheDump();
+					}
+					backups.push(bak);
+					DoUndo(true);
 					return true;
 				} else {
 					if (dir!==-1) {
-	    				backups.push(bak);
-	    			}
-	    			modified=true;
-	    		}
-	    		break;
-	    	}
-	    }
+							backups.push(bak);
+					}
+					modified=true;
+				}
+				break;
+			}
+		}
 
 		if (dontModify) {		
-    		if (verbose_logging) {
-    			consoleCacheDump();
-    		}
+			if (verbose_logging) {
+				consoleCacheDump();
+			}
 			return false;
 		}
 
-        for (var i=0;i<seedsToPlay_CantMove.length;i++) {
-	        	playSound(seedsToPlay_CantMove[i]);
-        }
+		for (var i=0;i<seedsToPlay_CantMove.length;i++) {
+			playSound(seedsToPlay_CantMove[i]);
+		}
 
-        for (var i=0;i<seedsToPlay_CanMove.length;i++) {
-	        	playSound(seedsToPlay_CanMove[i]);
-        }
+		for (var i=0;i<seedsToPlay_CanMove.length;i++) {
+			playSound(seedsToPlay_CanMove[i]);
+		}
 
-        for (var i=0;i<state.sfx_CreationMasks.length;i++) {
-        	var entry = state.sfx_CreationMasks[i];
-        	if (sfxCreateMask.anyBitsInCommon(entry.objectMask)) {
-	        	playSound(entry.seed);
-        	}
-        }
+		for (var i=0;i<state.sfx_CreationMasks.length;i++) {
+			var entry = state.sfx_CreationMasks[i];
+			if (sfxCreateMask.anyBitsInCommon(entry.objectMask)) {
+				playSound(entry.seed);
+			}
+		}
 
-        for (var i=0;i<state.sfx_DestructionMasks.length;i++) {
-        	var entry = state.sfx_DestructionMasks[i];
-        	if (sfxDestroyMask.anyBitsInCommon(entry.objectMask)) {
-	        	playSound(entry.seed);
-        	}
-        }
+		for (var i=0;i<state.sfx_DestructionMasks.length;i++) {
+			var entry = state.sfx_DestructionMasks[i];
+			if (sfxDestroyMask.anyBitsInCommon(entry.objectMask)) {
+				playSound(entry.seed);
+			}
+		}
 
-	    for (var i=0;i<level.commandQueue.length;i++) {
-	 		var command = level.commandQueue[i];
-	 		if (command.charAt(1)==='f')  {//identifies sfxN
-	 			tryPlaySimpleSound(command);
-	 		}  	
+		for (var i=0;i<level.commandQueue.length;i++) {
+			var command = level.commandQueue[i];
+			if (command.charAt(1)==='f')	{//identifies sfxN
+				tryPlaySimpleSound(command);
+			}		
 			if (unitTesting===false) {
 				if (command==='message') {
 					showTempMessage();
 				}
 			}
-	    }
+		}
 
-	    if (textMode===false && (dontCheckWin===undefined ||dontCheckWin===false)) {
-	    	if (verbose_logging) { 
-	    		consolePrint('Checking win condition.');
+		if (textMode===false && (dontCheckWin===undefined ||dontCheckWin===false)) {
+			if (verbose_logging) { 
+				consolePrint('Checking win condition.');
 			}
-	    	checkWin();
-	    }
+			checkWin();
+		}
 
-	    if (!winning) {
+		if (!winning) {
 			if (level.commandQueue.indexOf('checkpoint')>=0) {
-		    	if (verbose_logging) { 
-		    		consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
+				if (verbose_logging) { 
+					consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
 				}
 				restartTarget=backupLevel();
 			}	 
 
-		    if (level.commandQueue.indexOf('again')>=0 && modified) {
-		    	//first have to verify that something's changed
-		    	var old_verbose_logging=verbose_logging;
-		    	var oldmessagetext = messagetext;
-		    	verbose_logging=false;
-		    	if (processInput(-1,true,true)) {
-			    	verbose_logging=old_verbose_logging;
+			if (level.commandQueue.indexOf('again')>=0 && modified) {
+				//first have to verify that something's changed
+				var old_verbose_logging=verbose_logging;
+				var oldmessagetext = messagetext;
+				verbose_logging=false;
+				if (processInput(-1,true,true)) {
+					verbose_logging=old_verbose_logging;
 
-			    	if (verbose_logging) { 
-			    		consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
+					if (verbose_logging) { 
+						consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
 					}
 
-			    	againing=true;
-			    	timer=0;
-			    } else {		    	
-			    	verbose_logging=old_verbose_logging;
+					againing=true;
+					timer=0;
+				} else {					
+					verbose_logging=old_verbose_logging;
 					if (verbose_logging) { 
 						consolePrint('AGAIN command not executed, it wouldn\'t make any changes.');
 					}
-			    }
-			    verbose_logging=old_verbose_logging;
-			    messagetext = oldmessagetext;
-		    }   
+				}
+				verbose_logging=old_verbose_logging;
+				messagetext = oldmessagetext;
+			}		
 		}
-		    
-
-	    level.commandQueue=[];
-
-    }
+		level.commandQueue=[];
+	}
 
 	if (verbose_logging) {
 		consoleCacheDump();

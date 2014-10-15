@@ -1,28 +1,11 @@
-var scope = self;
-
-// performance.now polyfill © Paul Irish
-// https://gist.github.com/paulirish/5438650
-// relies on Date.now() which has been supported everywhere modern for years.
-// as Safari 6 doesn't have support for NavigationTiming, we use a Date.now() timestamp for relative values
-// if you want values similar to what you'd get with real perf.now, place this towards the head of the page
-// but in reality, you're just getting the delta between now() calls, so it's not terribly important where it's placed
-// prepare base perf object
-if (!scope.hasOwnProperty("performance") || !performance || typeof performance === 'undefined') {
-    performance = {};
-}
-
-if (!performance.now) {
-  var nowOffset = Date.now();
-  if (performance.timing && performance.timing.navigationStart){
-    nowOffset = performance.timing.navigationStart
-  }
-  performance.now = function now(){
-    return Date.now() - nowOffset;
-  }
-}
-
 var Solver = (function() {
+	var scope = self || this || {};
+
 	var module = {};
+	var nowOffset = Date.now();
+	function now() {
+		return Date.now() - nowOffset;
+	}
 
 	var WAIT = -1;
 	var UP = 0;
@@ -35,7 +18,7 @@ var Solver = (function() {
 	var ITER_MAX = 100000;
 
 	var VERBOSE = false;
-	var REPLY_FN = scope.hasOwnProperty("reply") ? reply : null;
+	var REPLY_FN = reply;
 	var LEVEL = 0, RULES = "", SEED = null;
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
 	
@@ -49,16 +32,16 @@ var Solver = (function() {
 	//For shortish games, maybe even set hDiscount=0
 	var hDiscount = 1.0;
 	var gDiscount = 1.0;
-    var gLimit = Infinity;
+	var gLimit = Infinity;
 
-    var pauseAfterNextSolution = false;
-    var sentSolution = false;
-    var bestSolution;
+	var pauseAfterNextSolution = false;
+	var sentSolution = false;
+	var bestSolution;
 
 	var nodeId=0;
 	var open, closed, q;
 	var root;
-    var MODE = "fast";
+	var MODE = "fast";
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
@@ -70,21 +53,21 @@ var Solver = (function() {
 		RULES = config.rules;
 		SEED = config.seed;
 		VERBOSE = config.verbose;
-        MODE = config.mode || mode;
-        if(MODE == "fast") {
-            FIRST_SOLUTION_ONLY = true;
-            gDiscount = 1.0;
-            hDiscount = 1.0;
-        } else if(MODE == "fast_then_best") {
-            FIRST_SOLUTION_ONLY = false;
-            pauseAfterNextSolution = true;
-            gDiscount = 1.0;
-            hDiscount = 1.0;
-        }
+		MODE = config.mode || mode;
+		if(MODE == "fast") {
+			FIRST_SOLUTION_ONLY = true;
+			gDiscount = 1.0;
+			hDiscount = 1.0;
+		} else if(MODE == "fast_then_best") {
+			FIRST_SOLUTION_ONLY = false;
+			pauseAfterNextSolution = true;
+			gDiscount = 1.0;
+			hDiscount = 1.0;
+		}
 		if(config.replyFn) {
 			REPLY_FN = config.replyFn;
 		}
-		START_TIME = performance.now();
+		START_TIME = now();
 
 		if(!window) {
 			compile(["loadLevel", LEVEL], RULES, SEED);
@@ -115,21 +98,21 @@ var Solver = (function() {
 		open = initSet();
 		closed = initSet();
 		q = new priority_queue.PriorityQueue(function(a,b) { return a.f-b.f; });
-        
-        var initHDiscount = hDiscount;
-        var initGDiscount = gDiscount;
-        hDiscount = 0;
-        gDiscount = 0;
+				
+		var initHDiscount = hDiscount;
+		var initGDiscount = gDiscount;
+		hDiscount = 0;
+		gDiscount = 0;
 		root = createOrFindNode(null,WAIT);
 		enqueueNode(root);
-        hDiscount = initHDiscount;
-        gDiscount = initGDiscount;
-        
-        //log("lvl"+LEVEL+": config.hint="+JSON.stringify(config.hint));
+		hDiscount = initHDiscount;
+		gDiscount = initGDiscount;
+				
+		//log("lvl"+LEVEL+": config.hint="+JSON.stringify(config.hint));
 		
 		if(config.hint && config.hint.prefixes && config.hint.prefixes.length) {
-            hDiscount = 0;
-            gDiscount = 0;
+			hDiscount = 0;
+			gDiscount = 0;
 			var hint = config.hint;
 			for(var hi=0; hi < hint.prefixes.length; hi++) {
 				var node = root;
@@ -166,15 +149,15 @@ var Solver = (function() {
 					time:timeSinceStart()
 				});
 			}
-            hDiscount = initHDiscount;
-            gDiscount = initGDiscount;
+			hDiscount = initHDiscount;
+			gDiscount = initGDiscount;
 		}
 
 		Solver.continueSearch(0);
 	};
 	
 	function timeSinceStart() {
-		return (performance.now()-START_TIME)/1000.0;
+		return (now()-START_TIME)/1000.0;
 	}
 	
 	function hasPredecessor(node,pred,predAction) {
@@ -187,7 +170,7 @@ var Solver = (function() {
 	}
 
 	module.continueSearch = function(continuation) {
-        sentSolution = false;
+		sentSolution = false;
 		testsAutoAdvanceLevel = false;
 		unitTesting = true;
 		var iters = searchSome(continuation);
@@ -263,17 +246,17 @@ var Solver = (function() {
 			//log("Dat:"+JSON.stringify(node.backup));
 			exactRemove(node,open);
 			exactInsert(node,closed);
-            //just close nodes with best paths longer than or equal to gLimit.
-            if(node.g >= gLimit) { continue; }
+			//just close nodes with best paths longer than or equal to gLimit.
+			if(node.g >= gLimit) { continue; }
 			expand(iter,node,null);
-            if(pauseAfterNextSolution && sentSolution) {
-                sentSolution = false;
-                pauseAfterNextSolution = false;
-                if(MODE == "fast_then_best") {
-                    gLimit = bestSolution.g;
-                } 
-                return iter;
-            }
+			if(pauseAfterNextSolution && sentSolution) {
+				sentSolution = false;
+				pauseAfterNextSolution = false;
+				if(MODE == "fast_then_best") {
+					gLimit = bestSolution.g;
+				} 
+				return iter;
+			}
 		}
 		return iter;
 	}
@@ -313,7 +296,7 @@ var Solver = (function() {
 				//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!
 				addEventualSolution(currentNode.predecessors,currentNode);
 			} else if(currentNode != root &&
-				      currentNode.predecessors.length == 1) {
+							  currentNode.predecessors.length == 1) {
 				//log("enQ "+currentNode.id);
 				enqueueNode(currentNode);
 			} else if(currentNode.eventualSolutions.length) {
@@ -370,7 +353,7 @@ var Solver = (function() {
 		//log("Returning "+JSON.stringify(ret)+" for "+n.id);
 		return ret;
 	}
-    
+		
 	var storedRuleCounts;
 	var storedRuleCategory = Utilities.RC_CATEGORY_WIN;
 	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
@@ -412,10 +395,10 @@ var Solver = (function() {
 			iteration:iter,
 			time:timeSinceStart()
 		});
-        sentSolution = true;
-        if(!bestSolution || currentNode.g < bestSolution.g) {
-            bestSolution =currentNode;
-        }
+		sentSolution = true;
+		if(!bestSolution || currentNode.g < bestSolution.g) {
+			bestSolution =currentNode;
+		}
 	};
 
 	var tempCentroids;
@@ -466,7 +449,7 @@ var Solver = (function() {
 				existingN.g = g;
 				//no need to recalculate H, since H is independent of path
 				// if(existingInOpen) {
-				// 	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
+				//	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
 				existingN.f = existingN.g + existingN.h;
 				if(existingInOpen) {
@@ -735,7 +718,7 @@ var Solver = (function() {
 	function switchToSearchState(searchState) {
 		winning = false;
 		// if(state.anyRandomRules) {
-		// 	RandomGen = new RNG(searchState.RNG);
+		//	RandomGen = new RNG(searchState.RNG);
 		// }
 		titleScreen=false;
 		titleSelected=false;

@@ -663,15 +663,27 @@ function setGameState(_state, command, randomseed) {
 }
 
 function RebuildLevelArrays() {
+	sfxCreateMask = new BitVec(STRIDE_OBJ);
+	sfxDestroyMask = new BitVec(STRIDE_OBJ);
+	
 	level.movements = new Int32Array(level.n_tiles * STRIDE_MOV);
-
-    level.rigidMovementAppliedMask = [];
-    level.rigidGroupIndexMask = [];
+	rigidbodyState.objects = new Int32Array(level.objects.length);
+	rigidbodyState.movements = new Int32Array(level.movements.length);
+	
+	level.bannedGroup = new Array(state.rules.length);
+	for(var i = 0; i < level.bannedGroup.length; i++) {
+		level.bannedGroup[i] = false;
+	}
+	
+	level.rigidMovementAppliedMask = [];
+	level.rigidGroupIndexMask = [];
+	rigidbodyState.rigidMovementAppliedMask = [];
+	rigidbodyState.rigidGroupIndexMask = [];
 	level.rowCellContents = [];
 	level.colCellContents = [];
 	level.mapCellContents = new BitVec(STRIDE_OBJ);
 	_movementsVec = new BitVec(STRIDE_MOV);
-
+	
 	_o1 = new BitVec(STRIDE_OBJ);
 	_o2 = new BitVec(STRIDE_OBJ);
 	_o2_5 = new BitVec(STRIDE_OBJ);
@@ -688,26 +700,30 @@ function RebuildLevelArrays() {
 	_m1 = new BitVec(STRIDE_MOV);
 	_m2 = new BitVec(STRIDE_MOV);
 	_m3 = new BitVec(STRIDE_MOV);
+	_m4 = new BitVec(STRIDE_MOV);
+	_m5 = new BitVec(STRIDE_MOV);
+	_m6 = new BitVec(STRIDE_MOV);
 	
-
-    for (var i=0;i<level.height;i++) {
-    	level.rowCellContents[i]=new BitVec(STRIDE_OBJ);	    	
-    }
-    for (var i=0;i<level.width;i++) {
-    	level.colCellContents[i]=new BitVec(STRIDE_OBJ);	    	
-    }
-
-    for (var i=0;i<level.n_tiles;i++)
-    {
-        level.rigidMovementAppliedMask[i]=new BitVec(STRIDE_MOV);
-        level.rigidGroupIndexMask[i]=new BitVec(STRIDE_MOV);
-    }
+	for (var i=0;i<level.height;i++) {
+		level.rowCellContents[i]=new BitVec(STRIDE_OBJ);	    	
+	}
+	for (var i=0;i<level.width;i++) {
+		level.colCellContents[i]=new BitVec(STRIDE_OBJ);	    	
+	}
+	
+	for (var i=0;i<level.n_tiles;i++)
+	{
+		level.rigidMovementAppliedMask[i]=new BitVec(STRIDE_MOV);
+		level.rigidGroupIndexMask[i]=new BitVec(STRIDE_MOV);
+		rigidbodyState.rigidMovementAppliedMask[i]=new BitVec(STRIDE_MOV);
+		rigidbodyState.rigidGroupIndexMask[i]=new BitVec(STRIDE_MOV);
+	}
 }
 
 var messagetext="";
 function restoreLevel(lev) {
 	oldflickscreendat=lev.oldflickscreendat.concat([]);
-
+	
 	level.objects = new Int32Array(lev.dat);
 	if (level.width !== lev.width || level.height !== lev.height) {
 		level.width = lev.width;
@@ -718,26 +734,24 @@ function restoreLevel(lev) {
 	}
 	else 
 	{
-	// layercount doesn't change
-
+		// layercount doesn't change
 		for (var i=0;i<level.n_tiles;i++) {
 			level.movements[i]=0;
-			level.rigidMovementAppliedMask[i]=0;
-			level.rigidGroupIndexMask[i]=0;
+			level.rigidMovementAppliedMask[i].setZero();
+			level.rigidGroupIndexMask[i].setZero();
 		}	
-
-	    for (var i=0;i<level.height;i++) {
-	    	var rcc = level.rowCellContents[i];
-	    	rcc.setZero();
-	    }
-	    for (var i=0;i<level.width;i++) {
-	    	var ccc = level.colCellContents[i];
-	    	ccc.setZero();
-	    }
+		
+		level.mapCellContents.setZero();
+		for (var i=0;i<level.height;i++) {
+			level.rowCellContents[i].setZero();
+		}
+		for (var i=0;i<level.width;i++) {
+			level.colCellContents[i].setZero();
+		}
 	}
-
-    againing=false;
-    level.commandQueue=[];
+	
+	againing=false;
+	level.commandQueue=[];
 }
 
 var zoomscreen=false;
@@ -1312,7 +1326,7 @@ CellPattern.prototype.toJSON = function() {
 };
 
 var _o1,_o2,_o2_5,_o3,_o4,_o5,_o6,_o7,_o8,_o9,_o10,_o11,_o12;
-var _m1,_m2,_m3;
+var _m1,_m2,_m3,_m4,_m5,_m6;
 
 CellPattern.prototype.replace = function(rule, currentIndex) {
 	var replace = this.replacement;
@@ -1367,18 +1381,21 @@ CellPattern.prototype.replace = function(rule, currentIndex) {
 	curMovementMask.ior(movementsSet);
 
 	var rigidchange=false;
-	var curRigidGroupIndexMask =0;
-	var curRigidMovementAppliedMask =0;
+	_m4.setZero();
+	var curRigidGroupIndexMask = _m4;
+	_m5.setZero();
+	var curRigidMovementAppliedMask = _m5;
 	if (rule.isRigid) {
 		var rigidGroupIndex = state.groupNumber_to_RigidGroupIndex[rule.groupNumber];
 		rigidGroupIndex++;//don't forget to -- it when decoding :O
-		var rigidMask = new BitVec(STRIDE_MOV);
+		_m6.setZero();
+		var rigidMask = _m6;
 		for (var layer = 0; layer < level.layerCount; layer++) {
 			rigidMask.ishiftor(rigidGroupIndex, layer * 5);
 		}
 		rigidMask.iand(replace.movementsLayerMask);
-		curRigidGroupIndexMask = level.rigidGroupIndexMask[currentIndex] || new BitVec(STRIDE_MOV);
-		curRigidMovementAppliedMask = level.rigidMovementAppliedMask[currentIndex] || new BitVec(STRIDE_MOV);
+		level.rigidGroupIndexMask[currentIndex].cloneInto(curRigidGroupIndexMask);
+		level.rigidMovementAppliedMask[currentIndex].cloneInto(curRigidMovementAppliedMask);
 
 		if (!rigidMask.bitsSetInArray(curRigidGroupIndexMask.data) &&
 			!replace.movementsLayerMask.bitsSetInArray(curRigidMovementAppliedMask.data) ) {
@@ -1395,8 +1412,8 @@ CellPattern.prototype.replace = function(rule, currentIndex) {
 	if (!oldCellMask.equals(curCellMask) || !oldMovementMask.equals(curMovementMask) || rigidchange) { 
 		result=true;
 		if (rigidchange) {
-			level.rigidGroupIndexMask[currentIndex] = curRigidGroupIndexMask;
-			level.rigidMovementAppliedMask[currentIndex] = curRigidMovementAppliedMask;
+			curRigidGroupIndexMask.cloneInto(level.rigidGroupIndexMask[currentIndex]);
+			curRigidMovementAppliedMask.cloneInto(level.rigidMovementAppliedMask[currentIndex]);
 		}
 
 		var created = curCellMask.cloneInto(_o4);
@@ -1706,27 +1723,46 @@ function generateTuples(lists) {
     return tuples;
 }
 
-function commitPreservationState(ruleGroupIndex) {
-	var propagationState = {
-		ruleGroupIndex:ruleGroupIndex,
-		//don't need to know the tuple index
-		objects:new Int32Array(level.objects),
-		movements:new Int32Array(level.movements),
-		rigidGroupIndexMask:level.rigidGroupIndexMask.concat([]),
-		rigidMovementAppliedMask:level.rigidMovementAppliedMask.concat([]),
-		bannedGroup:level.bannedGroup.concat([])
-	};
-	return propagationState;
+var rigidbodyState = {
+	//the first two are obvious
+	objects:new Int32Array(1),
+	movements:new Int32Array(1),
+	//the second two track artefacts left behind by rule execution,
+	//so that "detect if a rigidbody group failed to apply" can happen
+	//_OUTSIDE_ of regular rule application. this is because RB semantics
+	//say that if any parts of the body which were supposed to move can't move
+	//then the turn should be repeated without the rule that caused that failed movement.
+	rigidGroupIndexMask:[],
+	rigidMovementAppliedMask:[],
+	bannedGroup:[]
+};
+function commitPreservationState() {
+	rigidbodyState.objects.set(level.objects);
+	rigidbodyState.movements.set(level.movements);
+	for(var i = 0; i < level.rigidGroupIndexMask.length; i++) {
+		level.rigidGroupIndexMask[i].cloneInto(rigidbodyState.rigidGroupIndexMask[i]);
+	}
+	for(var i = 0; i < level.rigidMovementAppliedMask.length; i++) {
+		level.rigidMovementAppliedMask[i].cloneInto(rigidbodyState.rigidMovementAppliedMask[i]);
+	}
+	for(var i = 0; i < level.bannedGroup.length; i++) {
+		rigidbodyState.bannedGroup[i] = level.bannedGroup[i];
+	}
+	return rigidbodyState;
 }
 
 function restorePreservationState(preservationState) {
 //don't need to concat or anythign here, once something is restored it won't be used again.
-	level.objects = new Int32Array(preservationState.objects);
-	level.movements = new Int32Array(preservationState.movements);
-	level.rigidGroupIndexMask = preservationState.rigidGroupIndexMask.concat([]);
-    level.rigidMovementAppliedMask = preservationState.rigidMovementAppliedMask.concat([]);
-    sfxCreateMask=new BitVec(STRIDE_OBJ);
-    sfxDestroyMask=new BitVec(STRIDE_OBJ);
+	level.objects.set(preservationState.objects);
+	level.movements.set(preservationState.movements);
+	for(var i = 0; i < level.rigidGroupIndexMask.length; i++) {
+		rigidbodyState.rigidGroupIndexMask[i].cloneInto(level.rigidGroupIndexMask[i]);
+	}
+	for(var i = 0; i < level.rigidMovementAppliedMask.length; i++) {
+		rigidbodyState.rigidMovementAppliedMask[i].cloneInto(level.rigidMovementAppliedMask[i]);
+	}
+  sfxCreateMask.setZero();
+  sfxDestroyMask.setZero();
 }
 
 Rule.prototype.findMatches = function() {
@@ -1973,28 +2009,33 @@ function applyRules(rules, loopPoint, startRuleGroupindex, bannedGroup){
 
 //if this returns!=null, need to go back and reprocess
 function resolveMovements(dir){
-    var moved=true;
-    while(moved){
-        moved=false;
-        for (var i=0;i<level.n_tiles;i++) {
-        	moved = repositionEntitiesAtCell(i) || moved;
-        }
-    }
-    var doUndo=false;
-
+	var moved=true;
+	while(moved){
+		moved=false;
+		for (var i=0;i<level.n_tiles;i++) {
+			moved = repositionEntitiesAtCell(i) || moved;
+		}
+	}
+	var doUndo=false;
+	
 	for (var i=0;i<level.n_tiles;i++) {
 		var cellMask = level.getCellInto(i,_o6);
 		var movementMask = level.getMovements(i);
 		if (!movementMask.iszero()) {
 			var rigidMovementAppliedMask = level.rigidMovementAppliedMask[i];
 			if (rigidMovementAppliedMask !== 0) {
+				//this cell participated in rigidbody movement
 				movementMask.iand(rigidMovementAppliedMask);
+				//unconsumed movement from rigidMovementAppliedMask is left over
 				if (!movementMask.iszero()) {
 					//find what layer was restricted
 					for (var j=0;j<level.layerCount;j++) {
 						var layerSection = movementMask.getshiftor(0x1f, 5*j);
 						if (layerSection!==0) {
 							//this is our layer!
+							//Question: Is it possible that multiple rigidbody groups could have
+							//applied to one index, leading to a contested square? If not, why
+							//store a mask instead of a single rule group index?
 							var rigidGroupIndexMask = level.rigidGroupIndexMask[i];
 							var rigidGroupIndex = rigidGroupIndexMask.getshiftor(0x1f, 5*j);
 							rigidGroupIndex--;//group indices start at zero, but are incremented for storing in the bitfield
@@ -2006,6 +2047,7 @@ function resolveMovements(dir){
 					}
 				}
 			}
+			//play "move failed" SFX
 			for (var j=0;j<state.sfx_MovementFailureMasks.length;j++) {
 				var o = state.sfx_MovementFailureMasks[j];
 				var objectMask = o.objectMask;
@@ -2016,33 +2058,30 @@ function resolveMovements(dir){
 					}
 				}
 			}
-    	}
-
-    	for (var j=0;j<STRIDE_MOV;j++) {
-    		level.movements[j+i*STRIDE_MOV]=0;
-    	}
-	    level.rigidGroupIndexMask[i]=0;
-	    level.rigidMovementAppliedMask[i]=0;
-    }
-    return doUndo;
+		}
+		//nullify unused moves at index i
+		for (var j=0;j<STRIDE_MOV;j++) {
+			level.movements[j+i*STRIDE_MOV]=0;
+		}
+		//and wipe out the rigidbody data
+		level.rigidGroupIndexMask[i].setZero();
+		level.rigidMovementAppliedMask[i].setZero();
+	}
+	return doUndo;
 }
 
-var sfxCreateMask=0;
-var sfxDestroyMask=0;
+var sfxCreateMask=new BitVec(1);
+var sfxDestroyMask=new BitVec(1);
 
 function calculateRowColMasks() {
-	for(var i=0;i<level.mapCellContents.length;i++) {
-		level.mapCellContents[i]=0;
-	}
+	level.mapCellContents.setZero();
 
 	for (var i=0;i<level.width;i++) {
-		var ccc = level.colCellContents[i];
-		ccc.setZero();
+		level.colCellContents[i].setZero();
 	}
 
 	for (var i=0;i<level.height;i++) {
-		var rcc = level.rowCellContents[i];
-		rcc.setZero();
+		level.rowCellContents[i].setZero();
 	}
 
 	for (var i=0;i<level.width;i++) {
@@ -2194,9 +2233,11 @@ function processInput(inputDir,dontCheckWin,dontModify) {
 function runAllRules(bak) {
 	againing = false;
 	var i=0;
-	level.bannedGroup = [];
-	sfxCreateMask=new BitVec(STRIDE_OBJ);
-	sfxDestroyMask=new BitVec(STRIDE_OBJ);
+	for(var j = 0; j < level.bannedGroup.length; j++) {
+		level.bannedGroup[j] = false;
+	}
+	sfxCreateMask.setZero();
+	sfxDestroyMask.setZero();
 
 	seedsToPlay_CanMove=[];
 	seedsToPlay_CantMove=[];
@@ -2215,22 +2256,22 @@ function runAllRules(bak) {
 		if (verbose_logging){consolePrint('applying rules');}
 
 		applyRules(state.rules, state.loopPoint, startRuleGroupIndex, level.bannedGroup);
+		
 		var shouldUndo = resolveMovements();
-
 		if (shouldUndo) {
 			rigidloop=true;
 			restorePreservationState(startState);
 			startRuleGroupIndex=0;//rigidGroupUndoDat.ruleGroupIndex+1;
-		} else {
-			if (verbose_logging){consolePrint('applying late rules');}
-			applyRules(state.lateRules, state.lateLoopPoint, 0);
-			startRuleGroupIndex=0;
 		}
 	} while (i < 50 && rigidloop);
-
+		
 	if (i>=50) {
 		consolePrint("looped through 50 times, gave up.	 too many loops!");
 	}
+	
+	if (verbose_logging){consolePrint('applying late rules');}
+	applyRules(state.lateRules, state.lateLoopPoint, 0);
+	startRuleGroupIndex=0;		
 }
 
 function handleCommands(modified) {

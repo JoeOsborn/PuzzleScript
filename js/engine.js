@@ -667,8 +667,6 @@ function RebuildLevelArrays() {
 	sfxDestroyMask = new BitVec(STRIDE_OBJ);
 	
 	level.movements = new Int32Array(level.n_tiles * STRIDE_MOV);
-	rigidbodyState.objects = new Int32Array(level.objects.length);
-	rigidbodyState.movements = new Int32Array(level.movements.length);
 	
 	level.bannedGroup = new Array(state.rules.length);
 	for(var i = 0; i < level.bannedGroup.length; i++) {
@@ -677,8 +675,6 @@ function RebuildLevelArrays() {
 	
 	level.rigidMovementAppliedMask = [];
 	level.rigidGroupIndexMask = [];
-	rigidbodyState.rigidMovementAppliedMask = [];
-	rigidbodyState.rigidGroupIndexMask = [];
 	level.rowCellContents = [];
 	level.colCellContents = [];
 	level.mapCellContents = new BitVec(STRIDE_OBJ);
@@ -715,8 +711,6 @@ function RebuildLevelArrays() {
 	{
 		level.rigidMovementAppliedMask[i]=new BitVec(STRIDE_MOV);
 		level.rigidGroupIndexMask[i]=new BitVec(STRIDE_MOV);
-		rigidbodyState.rigidMovementAppliedMask[i]=new BitVec(STRIDE_MOV);
-		rigidbodyState.rigidGroupIndexMask[i]=new BitVec(STRIDE_MOV);
 	}
 }
 
@@ -839,12 +833,11 @@ function moveEntitiesAtIndex(positionIndex, entityMask, dirMask) {
 
 function startMovement(dir) {
 	var movedany=false;
-    var playerPositions = getPlayerPositions();
-    for (var i=0;i<playerPositions.length;i++) {
-        var playerPosIndex = playerPositions[i];
-        moveEntitiesAtIndex(playerPosIndex,state.playerMask,dir);
-    }
-    return playerPositions;
+	var playerPositions = getPlayerPositions();
+	for (var i=0;i<playerPositions.length;i++) {
+		var playerPosIndex = playerPositions[i];
+		moveEntitiesAtIndex(playerPosIndex,state.playerMask,dir);
+	}
 }
 
 var dirMasksDelta = {
@@ -954,6 +947,8 @@ function Level(lineNumber, width, height, layerCount, objects) {
 	this.objects = objects;
 	this.layerCount = layerCount;
 	this.commandQueue = [];
+	this.rigidGroupIndexMask = [];
+	this.rigidMovementAppliedMask = [];
 }
 
 Level.prototype.clone = function() {
@@ -1723,43 +1718,17 @@ function generateTuples(lists) {
     return tuples;
 }
 
-var rigidbodyState = {
-	//the first two are obvious
-	objects:new Int32Array(1),
-	movements:new Int32Array(1),
-	//the second two track artefacts left behind by rule execution,
-	//so that "detect if a rigidbody group failed to apply" can happen
-	//_OUTSIDE_ of regular rule application. this is because RB semantics
-	//say that if any parts of the body which were supposed to move can't move
-	//then the turn should be repeated without the rule that caused that failed movement.
-	rigidGroupIndexMask:[],
-	rigidMovementAppliedMask:[],
-	bannedGroup:[]
-};
-function commitPreservationState() {
-	rigidbodyState.objects.set(level.objects);
-	rigidbodyState.movements.set(level.movements);
-	for(var i = 0; i < level.rigidGroupIndexMask.length; i++) {
-		level.rigidGroupIndexMask[i].cloneInto(rigidbodyState.rigidGroupIndexMask[i]);
-	}
-	for(var i = 0; i < level.rigidMovementAppliedMask.length; i++) {
-		level.rigidMovementAppliedMask[i].cloneInto(rigidbodyState.rigidMovementAppliedMask[i]);
-	}
-	for(var i = 0; i < level.bannedGroup.length; i++) {
-		rigidbodyState.bannedGroup[i] = level.bannedGroup[i];
-	}
-	return rigidbodyState;
-}
-
-function restorePreservationState(preservationState) {
+function restorePreservationState(dat) {
 //don't need to concat or anythign here, once something is restored it won't be used again.
-	level.objects.set(preservationState.objects);
-	level.movements.set(preservationState.movements);
+	level.objects.set(dat);
+	for(var i = 0; i < level.movements.length; i++) {
+		level.movements[i] = 0;
+	}
 	for(var i = 0; i < level.rigidGroupIndexMask.length; i++) {
-		rigidbodyState.rigidGroupIndexMask[i].cloneInto(level.rigidGroupIndexMask[i]);
+		level.rigidGroupIndexMask[i].setZero();
 	}
 	for(var i = 0; i < level.rigidMovementAppliedMask.length; i++) {
-		rigidbodyState.rigidMovementAppliedMask[i].cloneInto(level.rigidMovementAppliedMask[i]);
+		level.rigidMovementAppliedMask[i].setZero();
 	}
   sfxCreateMask.setZero();
   sfxDestroyMask.setZero();
@@ -2114,26 +2083,26 @@ function dirToBits(dir) {
 
 /* returns a bool indicating if anything changed */
 function processInput(inputDir,dontCheckWin,dontModify) {
-	if(dir > 4) { return; }
-
+	if(inputDir > 4) { return; }
+	
 	if (verbose_logging) { 
-		if (dir===-1) {
+		if (inputDir===-1) {
 			consolePrint('Turn starts with no input.')
 		} else {
 			consolePrint('=======================');
-			consolePrint('Turn starts with input of ' + ['up','left','down','right','action'][dir]+'.');
+			consolePrint('Turn starts with input of ' + ['up','left','down','right','action'][inputDir]+'.');
 		}
 	}
 
 	level.commandQueue=[];
 	var bak = backupLevel();
 	var dir = inputDir >= 0 && inputDir <= 4 ? dirToBits(inputDir) : inputDir;
-	//set up all the "> Player" etc facts
-	var playerPositions = dir >= 0 ? startMovement(dir) : [];
+	var playerPositions = getPlayerPositions();
+	againing = false;
 	
-	runAllRules(bak);
+	runAllRules(dir,bak);
 	
-	if (playerPositions.length>0 && state.metadata.require_player_movement!==undefined) {
+	if (playerPositions.length>0 && state.metadata.require_player_movement!==undefined && dir > 0) {
 		var somemoved=false;
 		for (var i=0;i<playerPositions.length;i++) {
 			var pos = playerPositions[i];
@@ -2230,8 +2199,7 @@ function processInput(inputDir,dontCheckWin,dontModify) {
 
 
 
-function runAllRules(bak) {
-	againing = false;
+function runAllRules(dir,bak) {
 	var i=0;
 	for(var j = 0; j < level.bannedGroup.length; j++) {
 		level.bannedGroup[j] = false;
@@ -2242,9 +2210,12 @@ function runAllRules(bak) {
 	seedsToPlay_CanMove=[];
 	seedsToPlay_CantMove=[];
 
+	if(dir >= 0) { 
+		startMovement(dir); 
+	}
+
 	calculateRowColMasks();
 
-	var startState = commitPreservationState();
 	var rigidloop=false;
 	var startRuleGroupIndex=0;
 	do {
@@ -2260,8 +2231,11 @@ function runAllRules(bak) {
 		var shouldUndo = resolveMovements();
 		if (shouldUndo) {
 			rigidloop=true;
-			restorePreservationState(startState);
-			startRuleGroupIndex=0;//rigidGroupUndoDat.ruleGroupIndex+1;
+			restorePreservationState(bak.dat);
+			if(dir >= 0) { 
+				startMovement(dir);
+			}
+			startRuleGroupIndex=0;
 		}
 	} while (i < 50 && rigidloop);
 		

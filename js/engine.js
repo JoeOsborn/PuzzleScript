@@ -1535,6 +1535,171 @@ function DoesCellRowMatch(direction,cellRow,i,k) {
     return false;
 }
 
+function matchCellRowAt(direction, cellRowMatch, cellRow, cellRowMask, col, row) {	
+	var result=[];
+	
+	if ((!cellRowMask.bitsSetInArray(level.mapCellContents.data))) {
+		return result;
+	}
+
+    var len=cellRow.length;
+
+	var xmin=col;
+	var xmax=Math.min(col+len, level.width);
+	var ymin=row;
+	var ymax=Math.min(row+len, level.height);
+
+    switch(direction) {
+    	case 1://up
+    	{
+    		ymin+=(len-1);
+    		break;
+    	}
+    	case 2: //down 
+    	{
+			ymax-=(len-1);
+			break;
+    	}
+    	case 4: //left
+    	{
+    		xmin+=(len-1);
+    		break;
+    	}
+    	case 8: //right
+		{
+			xmax-=(len-1);	
+			break;
+		}
+    	default:
+    	{
+    		window.console.log("EEEP "+direction);
+    	}
+    }
+
+    var horizontal=direction>2;
+    if (horizontal) {
+		for (var y=ymin;y<ymax;y++) {
+			if (!cellRowMask.bitsSetInArray(level.rowCellContents[y].data)) {
+				continue;
+			}
+
+			for (var x=xmin;x<xmax;x++) {
+				var i = x*level.height+y;
+				if (cellRowMatch(cellRow,i))
+				{
+					result.push(i);
+				}
+			}
+		}
+	} else {
+		for (var x=xmin;x<xmax;x++) {
+			if (!cellRowMask.bitsSetInArray(level.colCellContents[x].data)) {
+				continue;
+			}
+
+			for (var y=ymin;y<ymax;y++) {
+				var i = x*level.height+y;
+				if (cellRowMatch(	cellRow,i))
+				{
+					result.push(i);
+				}
+			}
+		}		
+	}
+
+	return result;
+}
+
+
+function matchCellRowWildCardAt(direction, cellRowMatch, cellRow,cellRowMask, col, row) {
+	var result=[];
+	if ((!cellRowMask.bitsSetInArray(level.mapCellContents.data))) {
+		return result;
+	}
+	var len=cellRow.length-1;//remove one to deal with wildcard
+	
+	var xmin=col;
+	var xmax=Math.min(col+len, level.width);
+	var ymin=row;
+	var ymax=Math.min(row+len, level.height);
+
+    switch(direction) {
+    	case 1://up
+    	{
+    		ymin+=(len-1);
+    		break;
+    	}
+    	case 2: //down 
+    	{
+			ymax-=(len-1);
+			break;
+    	}
+    	case 4: //left
+    	{
+    		xmin+=(len-1);
+    		break;
+    	}
+    	case 8: //right
+		{
+			xmax-=(len-1);	
+			break;
+		}
+    	default:
+    	{
+    		window.console.log("EEEP2 "+direction);
+    	}
+    }
+
+
+
+    var horizontal=direction>2;
+    if (horizontal) {
+		for (var y=ymin;y<ymax;y++) {
+			if (!cellRowMask.bitsSetInArray(level.rowCellContents[y].data)) {
+				continue;
+			}
+
+			for (var x=xmin;x<xmax;x++) {
+				var i = x*level.height+y;
+				var kmax;
+
+				if (direction === 4) { //left
+					kmax=x-len+2;
+				} else if (direction === 8) { //right
+					kmax=level.width-(x+len)+1;	
+				} else {
+					window.console.log("EEEP2 "+direction);					
+				}
+
+				result.push.apply(result, cellRowMatch(cellRow,i,kmax,0));
+			}
+		}
+	} else {
+		for (var x=xmin;x<xmax;x++) {
+			if (!cellRowMask.bitsSetInArray(level.colCellContents[x].data)) {
+				continue;
+			}
+
+			for (var y=ymin;y<ymax;y++) {
+				var i = x*level.height+y;
+				var kmax;
+
+				if (direction === 2) { // down
+					kmax=level.height-(y+len)+1;
+				} else if (direction === 1) { // up
+					kmax=y-len+2;					
+				} else {
+					window.console.log("EEEP2 "+direction);
+				}
+				result.push.apply(result, cellRowMatch(cellRow,i,kmax,0));
+			}
+		}		
+	}
+
+	return result;
+}
+
+
 function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask) {	
 	var result=[];
 	
@@ -1812,30 +1977,57 @@ Rule.prototype.applyAt = function(delta,tuple,check) {
     return result;
 };
 
+Rule.prototype.findAndApply = function(matchSoFar,matchFn) {
+	var cellRowIndex = matchSoFar.length;
+  var cellRow = this.patterns[cellRowIndex];
+  var matchFunction = this.cellRowMatches[cellRowIndex];
+	for(var col = 0; col < level.width; col++) {
+		for(var row = 0; row < level.height; row++) {
+  		if (this.isEllipsis[cellRowIndex]) {//if ellipsis
+  			var thisMatch = matchCellRowWildCardAt(this.direction,matchFunction,cellRow,this.cellRowMasks[cellRowIndex],col,row);
+  		} else {
+  			var thisMatch = matchCellRowAt(this.direction,matchFunction,cellRow,this.cellRowMasks[cellRowIndex],col,row);
+  		}
+			if(thisMatch.length > 0) {
+				if(matchSoFar.length+1 < this.patterns.length) {
+					this.findAndApply(matchSoFar.concat([thisMatch]), matchFn);
+				} else {
+					matchFn(matchSoFar.concat([thisMatch]));
+				}
+			}
+		}
+	}
+}
+
 Rule.prototype.tryApply = function() {
 	var delta = dirMasksDelta[this.direction];
+	
+	var anyMatches = false;
+	var anyApplications = false;
+	var rule = this;
+	this.findAndApply([], function(matches) {
+		anyMatches = true;
+		anyMatchesThisTime = true;
+		if(rule.hasReplacements) {
+			var tuples = generateTuples(matches);
+			for (var tupleIndex=0;tupleIndex<tuples.length;tupleIndex++) {
+				var tuple = tuples[tupleIndex];
+				//replacements of later patterns can invalidate earlier-found matches,
+				//so if there's more than one pattern we must always verify that the match
+				//is sound. For some reason, we have to do this on the very first time, too.
+				//Ellipses have the same property.
+				var shouldCheck = rule.patterns.length > 1 || tupleIndex > 0;
+				var success = rule.applyAt(delta,tuple,shouldCheck);
+				anyApplications = success || anyApplications;
+			}
+		}
+	});
 
-    //get all cellrow matches
-    var matches = this.findMatches();
-    if (matches.length===0) {
-    	return false;
-    }
-
-    var result=false;	
-	if (this.hasReplacements) {
-	    var tuples = generateTuples(matches);
-	    for (var tupleIndex=0;tupleIndex<tuples.length;tupleIndex++) {
-	        var tuple = tuples[tupleIndex];
-	        var shouldCheck=tupleIndex>0;
-	        var success = this.applyAt(delta,tuple,shouldCheck);
-	        result = success || result;
-	    }
+	if(anyMatches) {
+		this.queueCommands();
 	}
-
-    if (matches.length>0) {
-    	this.queueCommands();
-    }
-    return result;
+	
+	return anyApplications;	
 };
 
 Rule.prototype.queueCommands = function() {

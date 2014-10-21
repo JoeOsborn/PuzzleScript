@@ -2391,6 +2391,9 @@ function loadFile(str) {
 	twiddleMetaData(state);
 
 	generateLoopPoints(state);
+	
+	compileRules(state,state.rules);
+	compileRules(state,state.lateRules);
 
 	generateSoundData(state);
 
@@ -2485,7 +2488,113 @@ function compile(command,text,randomseed) {
 	consoleCacheDump();
 }
 
-
+function compileRules(state,rules) {
+	for(var i = 0; i < rules.length; i++) {
+		var ruleGroup = rules[i];
+		for(var j = 0; j < ruleGroup.length; j++) {
+			var rule = ruleGroup[j];
+			var dir = rule.direction;
+			var matchChecks = [];
+			var matchLabels = [];
+			var functionBody = [
+				"var delta = dirMasksDelta["+dir+"];",
+				"var anyMatches = false;"
+			];
+			if(rule.hasReplacements) {
+				functionBody.push("var anyApplications = false;");
+			}
+			var functionPost = [];
+			var tabs = "\t";
+			for(var p = 0; p < rule.patterns.length; p++) {
+				matchLabels[p] = "seek"+p;
+				var loopIndex = "idx"+p;
+				var cellPattern = "rule.patterns["+p+"]";
+				functionBody.push(tabs+matchLabels[p]+":");
+				functionBody.push(tabs+"for(var "+loopIndex+"= 0;"+loopIndex+"< level.n_tiles;"+loopIndex+"++) {");
+				functionPost.unshift(tabs+"}");
+				tabs = tabs + "\t";
+				matchChecks[p] = "DoesCellRowMatch("+dir+","+cellPattern+","+loopIndex+")";
+				if(rule.isEllipsis[p]) {
+					var ellipsisLoopLabel = "seekWildcard"+p;
+					var ellipsisLoopIndex = "k"+p;
+					var x = "(("+loopIndex+" / level.height)|0)";
+					var y = "(("+loopIndex+" - "+x+" * level.height)|0)";
+					var ellipsisLength = rule.patterns[p].length-1;
+					var kmax="1";
+					switch(dir) {
+						case 1: //up
+							kmax = y+"-"+ellipsisLength+"+2";
+							break;
+						case 2: //down
+							kmax = "level.height-("+y+"+"+ellipsisLength+")+1";
+							break;
+							
+						case 4: //left
+							kmax = x+"-"+ellipsisLength+"+2";						
+							break;
+						case 8: //right
+							kmax = "level.width-("+x+"+"+ellipsisLength+")+1";	
+							break;
+							
+						default:
+							throw "NO DIRECTION";
+					}
+					var kmaxVar = "kmax"+p;
+					functionBody.push(tabs+"var "+kmaxVar+" = "+kmax);
+					functionBody.push(tabs+ellipsisLoopLabel+":");
+					functionBody.push(tabs+"for(var "+ellipsisLoopIndex+"= 0;"+ellipsisLoopIndex+" < "+kmaxVar+";"+ellipsisLoopIndex+"++) {");
+					matchChecks[p] = "DoesCellRowMatchWildCard("+dir+","+cellPattern+","+loopIndex+","+ellipsisLoopIndex+"+1"+","+ellipsisLoopIndex+")";
+					matchLabels[p] = ellipsisLoopLabel;
+					functionPost.unshift(tabs+"}");
+					tabs = tabs + "\t";
+				}
+				/* << means "macro level choice" >>, `` means "insert something"
+				if(!`matchCheck`) { continue; }
+				<<if last pattern>> 
+					`set flags`
+				  if(`apply`) `set more flags`
+				  <<for each pattern, including this one:>>
+						if(!`match check that pattern's loopIndex and kmin=ellipsisLoopIndex,kmax=ellipsisLoopIndex+1 (if used)`)
+							`continue at that pattern's loopLabel or ellipsisLoopLabel (whichever one failed first)`
+					`continue`
+				*/
+				if(p == rule.patterns.length-1) {
+					for(var pm = 0; pm < rule.patterns.length; pm++) {
+						//TODO: inline match checking
+						functionBody.push(tabs+"if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
+					}
+					functionBody.push(tabs+"anyMatches = true;");
+					if(rule.hasReplacements) {
+						//each pattern gets an entry; each entry is a number or a two element list.
+						//TODO: make it either a one or two element list!
+						//TODO: inline applyAt! lines 1982-2001.
+						var matchTuple = "[";
+						for(var pm = 0; pm < rule.patterns.length; pm++) {
+							if(rule.isEllipsis[pm]) {
+								matchTuple+="[idx"+pm+",k"+pm+"]";
+							} else {
+								matchTuple+="idx"+pm;
+							}
+							if(pm < rule.patterns.length-1) {
+								matchTuple+=",";
+							}
+						}
+						matchTuple += "]";
+						functionBody.push(tabs+"anyApplications = rule.applyAt(delta,"+matchTuple+",false) || anyApplications;");
+					}
+				}
+			}
+			rule.tryApplyFn = new Function("rule",
+				(functionBody.
+					concat(functionPost).
+					//TODO: inline queueCommands
+					concat(["if(anyMatches) { rule.queueCommands(); }"]).
+					concat(rule.hasReplacements ? ["return anyApplications;"] : ["return false;"])).
+				join("\n")
+			);
+		}
+	}
+}
 
 function qualifyURL(url) {
 	var a = document.createElement('a');

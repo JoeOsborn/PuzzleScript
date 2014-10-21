@@ -1111,6 +1111,37 @@ BitVec.prototype.anyBitsInCommon = function(other) {
 	return !this.bitsClearInArray(other.data);
 }
 
+//A dummy tryApply function in case we can't compile this rule yet.
+//This is also important to help keep the size/layout of Rule objects
+//the same.
+function interpretedTryApplyFn(rule) {
+	var delta = dirMasksDelta[rule.direction];
+	
+	var anyMatches = false;
+	var anyApplications = false;
+	this.findAndApply([], function(matches) {
+		anyMatches = true;
+		anyMatchesThisTime = true;
+		if(rule.hasReplacements) {
+			var tuples = generateTuples(matches);
+			for (var tupleIndex=0;tupleIndex<tuples.length;tupleIndex++) {
+				var tuple = tuples[tupleIndex];
+				//replacements of later patterns/ellipses can invalidate earlier-found
+				//matches, so if there's more than one pattern (or if there are ellipses
+				//and this is not the first match), we must always verify that the match
+				//is still sound.
+				var shouldCheck = rule.patterns.length > 1 || tupleIndex > 0;
+				var success = rule.applyAt(delta,tuple,shouldCheck);
+				anyApplications = success || anyApplications;
+			}
+		}
+	});
+	if(anyMatches) {
+		rule.queueCommands();
+	}
+	return anyApplications;	
+};
+
 function Rule(rule) {
 	this.direction = rule[0]; 		/* direction rule scans in */
 	this.patterns = rule[1];		/* lists of CellPatterns to match */
@@ -1123,6 +1154,7 @@ function Rule(rule) {
 	this.isRandom = rule[8];
 	this.cellRowMasks = rule[9];
 	this.cellRowMatches = [];
+	this.tryApplyFn = interpretedTryApplyFn;
 	for (var i=0;i<this.patterns.length;i++) {
 		this.cellRowMatches.push(this.generateCellRowMatchesFunction(this.patterns[i],this.isEllipsis[i]));
 	}
@@ -1453,46 +1485,50 @@ function DoesCellRowMatchWildCard(direction,cellRow,i,maxk,mink) {
 	if (mink === undefined) {
 		mink = 0;
 	}
-
 	var cellPattern = cellRow[0];
-
-    //var result=[];
-
-    if (cellPattern.matches(i)){
-    	var delta = dirMasksDelta[direction];
-    	var d0 = delta[0]*level.height;
+	//var result=[];
+	if (cellPattern.matches(i)){
+		var delta = dirMasksDelta[direction];
+		var d0 = delta[0]*level.height;
 		var d1 = delta[1];
-        var targetIndex = i;
-
-        for (var j=1;j<cellRow.length;j+=1) {
-            targetIndex = (targetIndex+d1+d0)%level.n_tiles;
-
-            var cellPattern = cellRow[j]
-            if (cellPattern === ellipsisPattern) {
-            	//BAM inner loop time
-            	for (var k=mink;k<maxk;k++) {
-            		var targetIndex2=targetIndex;
-                    targetIndex2 = (targetIndex2+(d1+d0)*(k)+level.n_tiles)%level.n_tiles;
-            		for (var j2=j+1;j2<cellRow.length;j2++) {
-		                cellPattern = cellRow[j2];
-					    if (!cellPattern.matches(targetIndex2)) {
-					    	break;
-					    }
-                        targetIndex2 = (targetIndex2+d1+d0)%level.n_tiles;
-            		}
-
-		            if (j2>=cellRow.length) {
-		            	return true;
-		                //result.push([i,k]);
-		            }
-            	}
-            	break;
-            } else if (!cellPattern.matches(targetIndex)) {
+	  var targetIndex = i;
+		for (var j=1;j<cellRow.length;j+=1) {
+			var x = (targetIndex/level.height)|0;
+			var y = (targetIndex-x*level.height)|0;
+			if(x+delta[0] < 0 || x+delta[0] >= level.width ||
+			   y+delta[1] < 0 || y+delta[1] >= level.height) {
+			  return false;
+			}
+	  	targetIndex = (targetIndex+d1+d0)%level.n_tiles;
+	    var cellPattern = cellRow[j]
+	    if (cellPattern === ellipsisPattern) {
+	    	//BAM inner loop time
+	    	for (var k=mink;k<maxk;k++) {
+	    		var targetIndex2=targetIndex;
+					targetIndex2 = (targetIndex2+(d1+d0)*(k)+level.n_tiles)%level.n_tiles;
+					for (var j2=j+1;j2<cellRow.length;j2++) {
+						cellPattern = cellRow[j2];
+						if(x+delta[0]*(k+j2-j) < 0 || x+delta[0]*(k+j2-j) >= level.width ||
+						   y+delta[1]*(k+j2-j) < 0 || y+delta[1]*(k+j2-j) >= level.height) {
+						  return false;
+						}
+						if (!cellPattern.matches(targetIndex2)) {
+							break;
+						}
+						targetIndex2 = (targetIndex2+d1+d0)%level.n_tiles;
+					}
+					if (j2>=cellRow.length) {
+						return true;
+						//result.push([i,k]);
+					}
+				}
+	    	break;
+	    } else if (!cellPattern.matches(targetIndex)) {
 				break;
-            }
-        }               
-    }  
-    return false;
+			}
+	  }
+	}  
+	return false;
 }
 
 //say cellRow has length 3
@@ -1507,35 +1543,45 @@ function cellRowMatchesFunctionGenerate(direction,cellRow,i) {
 
 function DoesCellRowMatch(direction,cellRow,i,k) {
 	var cellPattern = cellRow[0];
-    if (cellPattern.matches(i)) {
-
-	    var delta = dirMasksDelta[direction];
-	    var d0 = delta[0]*level.height;
+	if (cellPattern.matches(i)) {
+		var delta = dirMasksDelta[direction];
+		var d0 = delta[0]*level.height;
 		var d1 = delta[1];
 		var cr_l = cellRow.length;
-
-        var targetIndex = i;
-        for (var j=1;j<cr_l;j++) {
-            targetIndex = (targetIndex+d1+d0)%level.n_tiles;
-            cellPattern = cellRow[j];
+	 	
+		var targetIndex = i;
+		for (var j=1;j<cr_l;j++) {
+			var x = (targetIndex/level.height)|0;
+			var y = (targetIndex-x*level.height)|0;
+			if(x+delta[0] < 0 || x+delta[0] >= level.width ||
+			   y+delta[1] < 0 || y+delta[1] >= level.height) {
+			  return false;
+			}
+			targetIndex = (targetIndex+d1+d0)%level.n_tiles;
+			cellPattern = cellRow[j];
 			if (cellPattern === ellipsisPattern) {
-					//only for once off verifications
-            	targetIndex = (targetIndex+(d1+d0)*k)%level.n_tiles; 					
-            }
-		    if (!cellPattern.matches(targetIndex)) {
-                break;
-            }
-        }   
-        
-        if (j>=cellRow.length) {
-            return true;
-        }
-
-    }  
-    return false;
+				//only for once off verifications
+				if(x+delta[0]*(k+1) < 0 || x+delta[0]*(k+1) >= level.width ||
+				   y+delta[1]*(k+1) < 0 || y+delta[1]*(k+1) >= level.height) {
+				  return false;
+				}
+				targetIndex = (targetIndex+(d1+d0)*k)%level.n_tiles; 					
+			}
+			if (!cellPattern.matches(targetIndex)) {
+				break;
+			}
+		}
+		if (j>=cellRow.length) {
+			return true;
+		} 	
+	}  
+	return false;
 }
 
-function matchCellRowAt(direction, cellRowMatch, cellRow, cellRowMask, col, row) {	
+function matchCellRowAt(isEllipsis, direction, cellRowMatch, cellRow, cellRowMask, col, row) {	
+	if(isEllipsis) {
+		return matchCellRowWildCardAt(direction, cellRowMatch, cellRow, cellRowMask, col, row);
+	}
 	var result=[];
 	
 	if ((!cellRowMask.bitsSetInArray(level.mapCellContents.data))) {
@@ -2000,34 +2046,12 @@ Rule.prototype.findAndApply = function(matchSoFar,matchFn) {
 }
 
 Rule.prototype.tryApply = function() {
-	var delta = dirMasksDelta[this.direction];
-	
-	var anyMatches = false;
-	var anyApplications = false;
-	var rule = this;
-	this.findAndApply([], function(matches) {
-		anyMatches = true;
-		anyMatchesThisTime = true;
-		if(rule.hasReplacements) {
-			var tuples = generateTuples(matches);
-			for (var tupleIndex=0;tupleIndex<tuples.length;tupleIndex++) {
-				var tuple = tuples[tupleIndex];
-				//replacements of later patterns can invalidate earlier-found matches,
-				//so if there's more than one pattern we must always verify that the match
-				//is sound. For some reason, we have to do this on the very first time, too.
-				//Ellipses have the same property.
-				var shouldCheck = rule.patterns.length > 1 || tupleIndex > 0;
-				var success = rule.applyAt(delta,tuple,shouldCheck);
-				anyApplications = success || anyApplications;
-			}
-		}
-	});
-
-	if(anyMatches) {
-		this.queueCommands();
-	}
-	
-	return anyApplications;	
+	return this.tryApplyFn(this);
+	// try {
+	// } catch(e) {
+	// 	return this.tryApplyFn.call(this);
+	// 	throw(e);
+	// }
 };
 
 Rule.prototype.queueCommands = function() {

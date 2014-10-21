@@ -2496,8 +2496,9 @@ function compileRules(state,rules) {
 			var dir = rule.direction;
 			var matchChecks = [];
 			var matchLabels = [];
+			var cellPatterns = [];
 			var functionBody = [
-				"var delta = dirMasksDelta["+dir+"];",
+				"var delta = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;",
 				"var anyMatches = false;"
 			];
 			if(rule.hasReplacements) {
@@ -2507,11 +2508,12 @@ function compileRules(state,rules) {
 			var tabs = "";
 			for(var p = 0; p < rule.patterns.length; p++) {
 				matchLabels[p] = "seek"+p;
+				cellPatterns[p] = "pattern"+p;
 				var loopIndex = "idx"+p;
 				var x = "x"+p;
 				var y = "y"+p;
 				var mask = "mask"+p;
-				var cellPattern = "rule.patterns["+p+"]";
+				functionBody.push(tabs+"var "+cellPatterns[p]+" = rule.patterns["+p+"];");
 				functionBody.push(tabs+"var "+mask+" = rule.cellRowMasks["+p+"];");
 				functionBody.push(tabs+"if("+mask+".bitsSetInArray(level.mapCellContents.data)) {");
 				functionPost.unshift(tabs+"}");
@@ -2521,20 +2523,20 @@ function compileRules(state,rules) {
 					functionBody.push(tabs+"for(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
 					functionPost.unshift(tabs+"}");
 					functionBody.push(tabs+"\tif(!"+mask+".bitsSetInArray(level.rowCellContents["+y+"].data)) { continue; }")
-					functionBody.push(tabs+matchLabels[p]+":");
+					functionBody.push(tabs+"\t"+matchLabels[p]+":");
 					functionBody.push(tabs+"\tfor(var "+x+" = 0; "+x+" < level.width; "+x+"++) {");
 					functionPost.unshift(tabs+"\t}");
 				} else {
 					functionBody.push(tabs+"for(var "+x+" = 0; "+x+" < level.width; "+x+"++) {");
 					functionPost.unshift(tabs+"}");
 					functionBody.push(tabs+"\tif(!"+mask+".bitsSetInArray(level.colCellContents["+x+"].data)) { continue; }")
-					functionBody.push(tabs+matchLabels[p]+":");
+					functionBody.push(tabs+"\t"+matchLabels[p]+":");
 					functionBody.push(tabs+"\tfor(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
 					functionPost.unshift(tabs+"\t}");
 				}
 				tabs = tabs + "\t" + "\t";
 				functionBody.push(tabs+"var "+loopIndex+" = ("+x+" * level.height + "+y+")|0;");
-				matchChecks[p] = "DoesCellRowMatch("+dir+","+cellPattern+","+loopIndex+")";
+				matchChecks[p] = "DoesCellRowMatch("+dir+","+cellPatterns[p]+","+loopIndex+")";
 				if(rule.isEllipsis[p]) {
 					var ellipsisLoopLabel = "seekWildcard"+p;
 					var ellipsisLoopIndex = "k"+p;
@@ -2562,7 +2564,7 @@ function compileRules(state,rules) {
 					functionBody.push(tabs+"var "+kmaxVar+" = "+kmax);
 					functionBody.push(tabs+ellipsisLoopLabel+":");
 					functionBody.push(tabs+"for(var "+ellipsisLoopIndex+"= 0;"+ellipsisLoopIndex+" < "+kmaxVar+";"+ellipsisLoopIndex+"++) {");
-					matchChecks[p] = "DoesCellRowMatchWildCard("+dir+","+cellPattern+","+loopIndex+","+ellipsisLoopIndex+"+1"+","+ellipsisLoopIndex+")";
+					matchChecks[p] = "DoesCellRowMatchWildCard("+dir+","+cellPatterns[p]+","+loopIndex+","+ellipsisLoopIndex+"+1"+","+ellipsisLoopIndex+")";
 					matchLabels[p] = ellipsisLoopLabel;
 					functionPost.unshift(tabs+"}");
 					tabs = tabs + "\t";
@@ -2574,22 +2576,22 @@ function compileRules(state,rules) {
 					}
 					functionBody.push(tabs+"anyMatches = true;");
 					if(rule.hasReplacements) {
-						//each pattern gets an entry; each entry is a number or a two element list.
-						//TODO: make it either a one or two element list!
-						//TODO: inline applyAt! lines 1982-2001.
-						var matchTuple = "[";
+						functionBody.push(tabs+"var result = false;");
+						functionBody.push(tabs+"var targetIndex = 0|0;");
 						for(var pm = 0; pm < rule.patterns.length; pm++) {
-							if(rule.isEllipsis[pm]) {
-								matchTuple+="[idx"+pm+",k"+pm+"]";
-							} else {
-								matchTuple+="idx"+pm;
-							}
-							if(pm < rule.patterns.length-1) {
-								matchTuple+=",";
+							var cellIndex = "cellRow"+pm;
+							functionBody.push(tabs+"targetIndex = idx"+pm+";");
+							for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
+								if(rule.patterns[pm][ci] === ellipsisPattern) {
+									functionBody.push(tabs+"targetIndex += delta * k"+pm+";");
+								} else {
+									functionBody.push(tabs+"result = rule.patterns["+pm+"]["+ci+"].replace(rule, targetIndex) || result;");
+									functionBody.push(tabs+"targetIndex += delta;");
+								}
 							}
 						}
-						matchTuple += "]";
-						functionBody.push(tabs+"anyApplications = rule.applyAt(delta,"+matchTuple+",false) || anyApplications;");
+						functionBody.push(tabs+"if(result && verbose_logging) { consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a>" + dir + " applied.</font>'); }");
+						functionBody.push(tabs+"anyApplications = result || anyApplications;");
 					}
 				}
 			}

@@ -2493,31 +2493,39 @@ function compileRules(state,rules) {
 		var ruleGroup = rules[i];
 		for(var j = 0; j < ruleGroup.length; j++) {
 			var rule = ruleGroup[j];
+			var tabs = "";
 			var dir = rule.direction;
 			var matchChecks = [];
 			var matchLabels = [];
 			var cellPatterns = [];
 			var functionBody = [
 				"var delta = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;",
-				"var anyMatches = false;"
+				"var anyMatches = false;",
+				"var patterns = rule.patterns;"
 			];
 			if(rule.hasReplacements) {
 				functionBody.push("var anyApplications = false;");
 			}
+			for(var pm = 0; pm < rule.patterns.length; pm++) {
+				cellPatterns[pm] = "pattern"+pm;
+				functionBody.push(tabs+"var "+cellPatterns[pm]+" = patterns["+pm+"];");
+				functionBody.push(tabs+"var mask"+pm+" = rule.cellRowMasks["+pm+"];");
+				functionBody.push(tabs+"if(!mask"+pm+".bitsSetInArray(level.mapCellContents.data)) { return false; }");
+				if(rule.hasReplacements) {
+					for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
+						if(!(rule.patterns[pm][ci] === ellipsisPattern)) {
+							functionBody.push("var pattern"+pm+"_"+ci+" = rule.patterns["+pm+"]["+ci+"];");
+						}
+					}
+				}
+			}
 			var functionPost = [];
-			var tabs = "";
 			for(var p = 0; p < rule.patterns.length; p++) {
 				matchLabels[p] = "seek"+p;
-				cellPatterns[p] = "pattern"+p;
 				var loopIndex = "idx"+p;
 				var x = "x"+p;
 				var y = "y"+p;
 				var mask = "mask"+p;
-				functionBody.push(tabs+"var "+cellPatterns[p]+" = rule.patterns["+p+"];");
-				functionBody.push(tabs+"var "+mask+" = rule.cellRowMasks["+p+"];");
-				functionBody.push(tabs+"if("+mask+".bitsSetInArray(level.mapCellContents.data)) {");
-				functionPost.unshift(tabs+"}");
-				tabs = tabs + "\t";
 				var horizontal = dir > 2;
 				if(horizontal) {
 					functionBody.push(tabs+"for(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
@@ -2585,12 +2593,12 @@ function compileRules(state,rules) {
 								if(rule.patterns[pm][ci] === ellipsisPattern) {
 									functionBody.push(tabs+"targetIndex += delta * k"+pm+";");
 								} else {
-									functionBody.push(tabs+"result = rule.patterns["+pm+"]["+ci+"].replace(rule, targetIndex) || result;");
+									functionBody.push(tabs+"result = pattern"+pm+"_"+ci+".replace(rule, targetIndex) || result;");
 									functionBody.push(tabs+"targetIndex += delta;");
 								}
 							}
 						}
-						functionBody.push(tabs+"if(result && verbose_logging) { consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a>" + dir + " applied.</font>'); }");
+						functionBody.push(tabs+"if(result && verbose_logging) { consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[dir] + " applied.</font>'); }");
 						functionBody.push(tabs+"anyApplications = result || anyApplications;");
 					}
 				}

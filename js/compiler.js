@@ -2504,21 +2504,40 @@ function compileRules(state,rules) {
 				functionBody.push("var anyApplications = false;");
 			}
 			var functionPost = [];
-			var tabs = "\t";
+			var tabs = "";
 			for(var p = 0; p < rule.patterns.length; p++) {
 				matchLabels[p] = "seek"+p;
 				var loopIndex = "idx"+p;
+				var x = "x"+p;
+				var y = "y"+p;
+				var mask = "mask"+p;
 				var cellPattern = "rule.patterns["+p+"]";
-				functionBody.push(tabs+matchLabels[p]+":");
-				functionBody.push(tabs+"for(var "+loopIndex+"= 0;"+loopIndex+"< level.n_tiles;"+loopIndex+"++) {");
+				functionBody.push(tabs+"var "+mask+" = rule.cellRowMasks["+p+"];");
+				functionBody.push(tabs+"if("+mask+".bitsSetInArray(level.mapCellContents.data)) {");
 				functionPost.unshift(tabs+"}");
 				tabs = tabs + "\t";
+				var horizontal = dir > 2;
+				if(horizontal) {
+					functionBody.push(tabs+"for(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
+					functionPost.unshift(tabs+"}");
+					functionBody.push(tabs+"\tif(!"+mask+".bitsSetInArray(level.rowCellContents["+y+"].data)) { continue; }")
+					functionBody.push(tabs+matchLabels[p]+":");
+					functionBody.push(tabs+"\tfor(var "+x+" = 0; "+x+" < level.width; "+x+"++) {");
+					functionPost.unshift(tabs+"\t}");
+				} else {
+					functionBody.push(tabs+"for(var "+x+" = 0; "+x+" < level.width; "+x+"++) {");
+					functionPost.unshift(tabs+"}");
+					functionBody.push(tabs+"\tif(!"+mask+".bitsSetInArray(level.colCellContents["+x+"].data)) { continue; }")
+					functionBody.push(tabs+matchLabels[p]+":");
+					functionBody.push(tabs+"\tfor(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
+					functionPost.unshift(tabs+"\t}");
+				}
+				tabs = tabs + "\t" + "\t";
+				functionBody.push(tabs+"var "+loopIndex+" = ("+x+" * level.height + "+y+")|0;");
 				matchChecks[p] = "DoesCellRowMatch("+dir+","+cellPattern+","+loopIndex+")";
 				if(rule.isEllipsis[p]) {
 					var ellipsisLoopLabel = "seekWildcard"+p;
 					var ellipsisLoopIndex = "k"+p;
-					var x = "(("+loopIndex+" / level.height)|0)";
-					var y = "(("+loopIndex+" - "+x+" * level.height)|0)";
 					var ellipsisLength = rule.patterns[p].length-1;
 					var kmax="1";
 					switch(dir) {
@@ -2548,19 +2567,9 @@ function compileRules(state,rules) {
 					functionPost.unshift(tabs+"}");
 					tabs = tabs + "\t";
 				}
-				/* << means "macro level choice" >>, `` means "insert something"
-				if(!`matchCheck`) { continue; }
-				<<if last pattern>> 
-					`set flags`
-				  if(`apply`) `set more flags`
-				  <<for each pattern, including this one:>>
-						if(!`match check that pattern's loopIndex and kmin=ellipsisLoopIndex,kmax=ellipsisLoopIndex+1 (if used)`)
-							`continue at that pattern's loopLabel or ellipsisLoopLabel (whichever one failed first)`
-					`continue`
-				*/
 				if(p == rule.patterns.length-1) {
 					for(var pm = 0; pm < rule.patterns.length; pm++) {
-						//TODO: inline match checking
+						//TODO: inline match checking, maybe call another custom-named function.
 						functionBody.push(tabs+"if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
 					}
 					functionBody.push(tabs+"anyMatches = true;");

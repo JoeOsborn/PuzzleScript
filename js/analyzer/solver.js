@@ -356,7 +356,7 @@ var Solver = (function() {
 		
 	var storedRuleCounts;
 	var storedRuleCategory = Utilities.RC_CATEGORY_WIN;
-	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
+	function ruleApplied(rule,ruleGroup,ruleIndex,direction) {
 		Utilities.incrementRuleCount(storedRuleCounts,LEVEL,storedRuleCategory,ruleGroup,ruleIndex);
 	};
 	function getRuleCounts(currentNode, prefix) {

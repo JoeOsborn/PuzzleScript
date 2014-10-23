@@ -2494,7 +2494,7 @@ function loadFile(str) {
 var ifrm;
 function compile(command,text,randomseed) {
 	matchCache={};
-	forceRegenImages();
+	if(forceRegenImages) { forceRegenImages(); };
 	if (command===undefined) {
 		command = ["restart"];
 	}

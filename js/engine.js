@@ -1089,6 +1089,14 @@ BitVec.prototype.iszero = function() {
 	return true;
 }
 
+bitsSetInArray = function(bv, arr) {
+	for (var i = 0; i < bv.data.length; ++i) {
+		if ((bv.data[i] & arr[i]) !== bv.data[i]) {
+			return false;
+		}
+	}
+	return true;
+}
 BitVec.prototype.bitsSetInArray = function(arr) {
 	for (var i = 0; i < this.data.length; ++i) {
 		if ((this.data[i] & arr[i]) !== this.data[i]) {
@@ -1355,8 +1363,8 @@ CellPattern.prototype.toJSON = function() {
 var _o1,_o2,_o2_5,_o3,_o4,_o5,_o6,_o7,_o8,_o9,_o10,_o11,_o12;
 var _m1,_m2,_m3,_m4,_m5,_m6;
 
-CellPattern.prototype.replace = function(rule, currentIndex) {
-	var replace = this.replacement;
+replaceCell = function(cell, rule, currentIndex) {
+	var replace = cell.replacement;
 
 	if (replace === null) {
 		return false;
@@ -1559,14 +1567,6 @@ function DoesCellRowMatch(direction,cellRow,i,k) {
 			}
 			targetIndex = (targetIndex+d1+d0)%level.n_tiles;
 			cellPattern = cellRow[j];
-			if (cellPattern === ellipsisPattern) {
-				//only for once off verifications
-				if(x+delta[0]*(k+1) < 0 || x+delta[0]*(k+1) >= level.width ||
-				   y+delta[1]*(k+1) < 0 || y+delta[1]*(k+1) >= level.height) {
-				  return false;
-				}
-				targetIndex = (targetIndex+(d1+d0)*k)%level.n_tiles; 					
-			}
 			if (!cellPattern.matches(targetIndex)) {
 				break;
 			}
@@ -1787,13 +1787,13 @@ function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask) {
     	}
     }
 
-    var horizontal=direction>2;
-    if (horizontal) {
+  var horizontal=direction>2;
+  if (horizontal) {
 		for (var y=ymin;y<ymax;y++) {
 			if (!cellRowMask.bitsSetInArray(level.rowCellContents[y].data)) {
 				continue;
 			}
-
+  	
 			for (var x=xmin;x<xmax;x++) {
 				var i = x*level.height+y;
 				if (cellRowMatch(cellRow,i))
@@ -2007,7 +2007,7 @@ Rule.prototype.applyAt = function(delta,tuple,check) {
             	continue;
             }
 
-            result = preCell.replace(rule, currentIndex) || result;
+            result = replaceCell(preCell, rule, currentIndex) || result;
 
             currentIndex = (currentIndex+d1+d0)%level.n_tiles;
         }

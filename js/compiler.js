@@ -2392,8 +2392,8 @@ function loadFile(str) {
 
 	generateLoopPoints(state);
 	
-	compileRules(state,state.rules);
-	compileRules(state,state.lateRules);
+	compileRules(state,state.rules,"");
+	compileRules(state,state.lateRules,"late_");
 
 	generateSoundData(state);
 
@@ -2488,36 +2488,35 @@ function compile(command,text,randomseed) {
 	consoleCacheDump();
 }
 
-function compileRules(state,rules) {
+function compileRules(state,rules,prefix) {
 	for(var i = 0; i < rules.length; i++) {
 		var ruleGroup = rules[i];
 		for(var j = 0; j < ruleGroup.length; j++) {
 			var rule = ruleGroup[j];
-			var tabs = "";
+			var tabs = "\t";
 			var dir = rule.direction;
 			var matchChecks = [];
 			var matchLabels = [];
-			var cellPatterns = [];
 			var functionBody = [
-				"var delta = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;",
-				"var anyMatches = false;",
-				"var patterns = rule.patterns;"
+				tabs+"var delta = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;",
+				tabs+"var anyMatches = false;"
 			];
 			if(rule.hasReplacements) {
-				functionBody.push("var anyApplications = false;");
+				functionBody.push(tabs+"var anyApplications = false;");
 			}
 			for(var pm = 0; pm < rule.patterns.length; pm++) {
-				cellPatterns[pm] = "pattern"+pm;
-				functionBody.push(tabs+"var "+cellPatterns[pm]+" = patterns["+pm+"];");
-				functionBody.push(tabs+"var mask"+pm+" = rule.cellRowMasks["+pm+"];");
-				functionBody.push(tabs+"if(!mask"+pm+".bitsSetInArray(level.mapCellContents.data)) { return false; }");
-				if(rule.hasReplacements) {
-					for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
-						if(!(rule.patterns[pm][ci] === ellipsisPattern)) {
-							functionBody.push("var pattern"+pm+"_"+ci+" = rule.patterns["+pm+"]["+ci+"];");
-						}
+				for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
+					functionBody.push(tabs+"var mask"+pm+"_"+idx+" = "+rule.cellRowMasks[pm].data[idx]+";");
+				}
+				var maskCheck = tabs+"if(!(";
+				for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
+					maskCheck += "((mask"+pm+"_"+idx+" & level.mapCellContents.data["+idx+"]) == mask"+pm+"_"+idx+")";
+					if(idx < rule.cellRowMasks[pm].data.length-1) {
+						maskCheck += " && ";
 					}
 				}
+				maskCheck += ")) { return false; }";
+				functionBody.push(maskCheck);
 			}
 			var functionPost = [];
 			for(var p = 0; p < rule.patterns.length; p++) {
@@ -2525,30 +2524,78 @@ function compileRules(state,rules) {
 				var loopIndex = "idx"+p;
 				var x = "x"+p;
 				var y = "y"+p;
+				var len = rule.patterns[p].length - (rule.isEllipsis[p] ? 1 : 0);
+				
+				var xmin = 0;
+				var ymin = 0;
+				var xmaxDef = "level.width";
+				var ymaxDef = "level.height";
+
+		    switch(dir) {
+		    	case 1://up
+		    	{
+		    		ymin+=(len-1);
+		    		break;
+		    	}
+		    	case 2: //down 
+		    	{
+						ymaxDef+="-("+len+"-1)";
+						break;
+		    	}
+		    	case 4: //left
+		    	{
+		    		xmin+=(len-1);
+		    		break;
+		    	}
+		    	case 8: //right
+					{
+						xmaxDef+="-("+len+"-1)";
+						break;
+					}
+		    }
+				
+				functionBody.push(tabs+"var xmax"+p+" = "+xmaxDef+";");
+				functionBody.push(tabs+"var ymax"+p+" = "+ymaxDef+";");
 				var mask = "mask"+p;
 				var horizontal = dir > 2;
 				if(horizontal) {
-					functionBody.push(tabs+"for(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
+					functionBody.push(tabs+"for(var "+y+" = "+ymin+"; "+y+" < ymax"+p+"; "+y+"++) {");
 					functionPost.unshift(tabs+"}");
-					functionBody.push(tabs+"\tif(!"+mask+".bitsSetInArray(level.rowCellContents["+y+"].data)) { continue; }")
+					var maskCheck = tabs+"\tif(!(";
+					for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
+						maskCheck += "((mask"+p+"_"+idx+" & level.rowCellContents["+y+"].data["+idx+"]) == mask"+p+"_"+idx+")";
+						if(idx < rule.cellRowMasks[p].data.length-1) {
+							maskCheck += " && ";
+						}
+					}
+					maskCheck += ")) { continue; }";
+					functionBody.push(maskCheck);
 					functionBody.push(tabs+"\t"+matchLabels[p]+":");
-					functionBody.push(tabs+"\tfor(var "+x+" = 0; "+x+" < level.width; "+x+"++) {");
+					functionBody.push(tabs+"\tfor(var "+x+" = "+xmin+"; "+x+" < xmax"+p+"; "+x+"++) {");
 					functionPost.unshift(tabs+"\t}");
 				} else {
-					functionBody.push(tabs+"for(var "+x+" = 0; "+x+" < level.width; "+x+"++) {");
+					functionBody.push(tabs+"for(var "+x+" = "+xmin+"; "+x+" < xmax"+p+"; "+x+"++) {");
 					functionPost.unshift(tabs+"}");
-					functionBody.push(tabs+"\tif(!"+mask+".bitsSetInArray(level.colCellContents["+x+"].data)) { continue; }")
+					var maskCheck = tabs+"\tif(!(";
+					for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
+						maskCheck += "((mask"+p+"_"+idx+" & level.colCellContents["+x+"].data["+idx+"]) == mask"+p+"_"+idx+")";
+						if(idx < rule.cellRowMasks[p].data.length-1) {
+							maskCheck += " && ";
+						}
+					}
+					maskCheck += ")) { continue; }";
+					functionBody.push(maskCheck);
 					functionBody.push(tabs+"\t"+matchLabels[p]+":");
-					functionBody.push(tabs+"\tfor(var "+y+" = 0; "+y+" < level.height; "+y+"++) {");
+					functionBody.push(tabs+"\tfor(var "+y+" = "+ymin+"; "+y+" < ymax"+p+"; "+y+"++) {");
 					functionPost.unshift(tabs+"\t}");
 				}
 				tabs = tabs + "\t" + "\t";
 				functionBody.push(tabs+"var "+loopIndex+" = ("+x+" * level.height + "+y+")|0;");
-				matchChecks[p] = "DoesCellRowMatch("+dir+","+cellPatterns[p]+","+loopIndex+")";
+				matchChecks[p] = prefix+"match_"+i+"_"+j+"_"+p+"("+loopIndex+")";
 				if(rule.isEllipsis[p]) {
 					var ellipsisLoopLabel = "seekWildcard"+p;
 					var ellipsisLoopIndex = "k"+p;
-					var ellipsisLength = rule.patterns[p].length-1;
+					var ellipsisLength = len;
 					var kmax="1";
 					switch(dir) {
 						case 1: //up
@@ -2572,14 +2619,13 @@ function compileRules(state,rules) {
 					functionBody.push(tabs+"var "+kmaxVar+" = "+kmax);
 					functionBody.push(tabs+ellipsisLoopLabel+":");
 					functionBody.push(tabs+"for(var "+ellipsisLoopIndex+"= 0;"+ellipsisLoopIndex+" < "+kmaxVar+";"+ellipsisLoopIndex+"++) {");
-					matchChecks[p] = "DoesCellRowMatchWildCard("+dir+","+cellPatterns[p]+","+loopIndex+","+ellipsisLoopIndex+"+1"+","+ellipsisLoopIndex+")";
+					matchChecks[p] = prefix+"match_"+i+"_"+j+"_"+p+"("+loopIndex+","+ellipsisLoopIndex+")";
 					matchLabels[p] = ellipsisLoopLabel;
 					functionPost.unshift(tabs+"}");
 					tabs = tabs + "\t";
 				}
 				if(p == rule.patterns.length-1) {
 					for(var pm = 0; pm < rule.patterns.length; pm++) {
-						//TODO: inline match checking, maybe call another custom-named function.
 						functionBody.push(tabs+"if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
 					}
 					functionBody.push(tabs+"anyMatches = true;");
@@ -2593,8 +2639,10 @@ function compileRules(state,rules) {
 								if(rule.patterns[pm][ci] === ellipsisPattern) {
 									functionBody.push(tabs+"targetIndex += delta * k"+pm+";");
 								} else {
-									functionBody.push(tabs+"result = pattern"+pm+"_"+ci+".replace(rule, targetIndex) || result;");
-									functionBody.push(tabs+"targetIndex += delta;");
+									functionBody.push(tabs+"result = "+prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci+"(targetIndex) || result;");
+									if(ci < rule.patterns[pm].length-1) {
+										functionBody.push(tabs+"targetIndex += delta;");
+									}
 								}
 							}
 						}
@@ -2603,14 +2651,250 @@ function compileRules(state,rules) {
 					}
 				}
 			}
-			rule.tryApplyFn = new Function("rule",
-				(functionBody.
-					concat(functionPost).
-					//TODO: inline queueCommands
-					concat(["if(anyMatches) { rule.queueCommands(); }"]).
-					concat(rule.hasReplacements ? ["return anyApplications;"] : ["return false;"])).
-				join("\n")
+			var ruleFunction = 
+				"function "+prefix+"rule"+i+"_"+j+"(rule) {\n"+
+					(functionBody.
+						concat(functionPost).
+						//TODO: inline queueCommands
+						concat(["\tif(anyMatches) { rule.queueCommands(); }"]).
+						concat(rule.hasReplacements ? ["\treturn anyApplications;"] : ["\treturn false;"])).
+					join("\n")+
+				"\n}";
+			var cellReplaceFunctions = [];
+			for(var pm = 0; pm < rule.patterns.length; pm++) {
+				for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
+					var cell = rule.patterns[pm][ci];
+					var replaceFunctionBody = [];
+					var replaceFunctionPost = [];
+					tabs = "\t";
+					var replace = cell.replacement;
+					if(!replace) { continue; }
+					var objectsSet = replace.objectsSet.clone();
+					var objectsClear = replace.objectsClear.clone();
+					var movementsSet = replace.movementsSet.clone();
+					var movementsClear = replace.movementsClear.clone();
+					var objectsClearedInts = [];
+					var objectsSetInts = [];
+					var movementsClearedInts = [];
+					var movementsSetInts = [];
+					var oldCellMaskInts = [];
+					var oldMovementMaskInts = [];
+					replaceFunctionBody.push(tabs+"var colIndex=(index/level.height)|0;");
+					replaceFunctionBody.push(tabs+"var rowIndex=(index%level.height)|0;");	
+					//TODO: avoid generating code for masks that are always zero				
+					for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+						objectsClearedInts.push("objectsCleared"+idx);
+						replaceFunctionBody.push(tabs+"var "+objectsClearedInts[idx]+" = "+replace.objectsClear.data[idx]+";");
+						objectsSetInts.push("objectsSet"+idx);
+						replaceFunctionBody.push(tabs+"var "+objectsSetInts[idx]+" = "+replace.objectsSet.data[idx]+";");
+						oldCellMaskInts.push("oldCellMask"+idx);
+						replaceFunctionBody.push(tabs+"var "+oldCellMaskInts[idx]+" = level.objects[index*STRIDE_OBJ+"+idx+"];");
+					}
+					for(var idx = 0; idx < STRIDE_MOV; idx++) {
+						movementsClearedInts.push("movementsCleared"+idx);
+						replaceFunctionBody.push(tabs+"var "+movementsClearedInts[idx]+" = "+replace.movementsClear.data[idx]+" | "+replace.movementsLayerMask.data[idx]+";");
+						movementsSetInts.push("movementsSet"+idx);
+						replaceFunctionBody.push(tabs+"var "+movementsSetInts[idx]+" = "+replace.movementsSet.data[idx]+";");
+						oldMovementMaskInts.push("oldMovementMask"+idx);						
+						replaceFunctionBody.push(tabs+"var "+oldMovementMaskInts[idx]+" = level.movements[index*STRIDE_MOV+"+idx+"];");
+					}
+					if(!replace.randomEntityMask.iszero()) {
+						var choices=[];
+						for (var k=0;k<32*STRIDE_OBJ;k++) {
+							if (replace.randomEntityMask.get(k)) {
+								choices.push(k);
+							}
+						}
+						replaceFunctionBody.push(tabs+"switch(Math.floor(RandomGen.uniform() * "+choices.length+")) {");
+						for(var k = 0; k < choices.length; k++) {
+							replaceFunctionBody.push(tabs+"\tcase "+k+":");
+							var rand = choices[k];
+							var n = state.idDict[rand];
+							var o = state.objects[n];
+							objectsSet.ibitset(rand);
+							objectsClear.ior(state.layerMasks[o.layer]);
+							movementsClear.ishiftor(0x1f, 5 * o.layer);
+							for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+								replaceFunctionBody.push(tabs+"\t\t"+objectsClearedInts[idx]+" = "+objectsClear.data[idx]+";");
+								replaceFunctionBody.push(tabs+"\t\t"+objectsSetInts[idx]+" = "+objectsSet.data[idx]+";");
+							}
+							for(var idx = 0; idx < STRIDE_MOV; idx++) {
+								replaceFunctionBody.push(tabs+"\t\t"+movementsClearedInts[idx]+" = "+movementsClear.data[idx]+";");
+							}
+							replaceFunctionBody.push(tabs+"\t\tbreak;");
+							objectsSet = replace.objectsSet.clone();
+							objectsClear = replace.objectsClear.clone();
+							movementsClear = replace.movementsClear.clone();
+						}
+						replaceFunctionBody.push(tabs+"}");
+					}
+					if(!replace.randomDirMask.iszero()) {
+						for(var layerIndex=0; layerIndex < state.collisionLayers.length; layerIndex++) {
+							if(replace.randomDirMask.get(5*layerIndex)) {
+								replaceFunctionBody.push(tabs+"var randomDirBitPlusOffset"+layerIndex+" = Math.floor(RandomGen.uniform()*4) + "+(5*layerIndex)+";");
+								replaceFunctionBody.push(tabs+"switch(randomDirBitPlusOffset"+layerIndex+">>5) {");
+								for(var idx = 0; idx < movementsSetInts.length; idx++) {
+									replaceFunctionBody.push(tabs+"\tcase "+idx+":");
+									replaceFunctionBody.push(tabs+"\t\t"+movementsSetInts[idx]+" |= (1 << (randomDirBitPlusOffset"+layerIndex+" & 31));");
+									replaceFunctionBody.push(tabs+"\t\tbreak;");
+								}
+								replaceFunctionBody.push(tabs+"}");
+								replaceFunctionBody.push(tabs+movementsSetInts+"[randomDirBitPlusOffset"+layerIndex+">>5] |= (1 << (randomDirBitPlusOffset"+layerIndex+" & 31));");
+							}
+						}
+					}
+					replaceFunctionBody.push(tabs+"var changed = false;");
+					if(rule.isRigid) {
+						var rigidGroupIndex = state.groupNumber_to_RigidGroupIndex[rule.groupNumber];
+						rigidGroupIndex++;
+						var rigidMask = new BitVec(STRIDE_MOV);
+						for(var layer = 0; layer < state.collisionLayers.length; layer++) {
+							rigidMask.ishiftor(rigidGroupIndex, layer*5);
+						}
+						rigidMask.iand(replace.movementsLayerMask);
+						var rigidGroupIndexMaskInts = [];
+						var rigidMovementAppliedMaskInts = [];
+						for(var idx = 0; idx < STRIDE_MOV; idx++) {
+							rigidGroupIndexMaskInts.push("rigidGroupIndexMask"+idx);
+							rigidMovementAppliedMaskInts.push("rigidMovementAppliedMask"+idx);
+							replaceFunctionBody.push(tabs+"var "+rigidGroupIndexMaskInts[idx]+" = level.rigidGroupIndexMask[index].data["+idx+"];");
+							replaceFunctionBody.push(tabs+"var "+rigidMovementAppliedMaskInts[idx]+" = level.rigidMovementAppliedMask[index].data["+idx+"];");
+							replaceFunctionBody.push(tabs+"if(!(("+rigidMask.data[idx]+" & "+rigidGroupIndexMaskInts[idx]+") == "+rigidMask.data[idx]+") && !(("+replace.movementsLayerMask.data[idx]+" & "+rigidMovementAppliedMaskInts[idx]+") == "+replace.movementsLayerMask.data[idx]+")) {");
+							replaceFunctionBody.push(tabs+"\tlevel.rigidGroupIndexMask[index].data["+idx+"] |= "+rigidMask.data[idx]+";");
+							replaceFunctionBody.push(tabs+"\tlevel.rigidMovementAppliedMask[index].data["+idx+"] |= "+replace.movementsLayerMask.data[idx]+";");
+							replaceFunctionBody.push(tabs+"\tchanged = true;");
+							replaceFunctionBody.push(tabs+"}");
+						}
+					}
+					for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+						replaceFunctionBody.push(tabs+"level.objects[index*STRIDE_OBJ+"+idx+"] &= ~"+objectsClearedInts[idx]+";");
+						replaceFunctionBody.push(tabs+"level.objects[index*STRIDE_OBJ+"+idx+"] |= "+objectsSetInts[idx]+";");
+						replaceFunctionBody.push(tabs+"changed = changed || (level.objects[index*STRIDE_OBJ+"+idx+"] !== "+oldCellMaskInts[idx]+");");
+						
+						replaceFunctionBody.push(tabs+"level.colCellContents[colIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
+						replaceFunctionBody.push(tabs+"level.rowCellContents[rowIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
+						replaceFunctionBody.push(tabs+"level.mapCellContents.data["+idx+"] |= "+objectsSetInts[idx]+";");
+						replaceFunctionBody.push(tabs+"sfxCreateMask.data["+idx+"] |= level.objects[index*STRIDE_OBJ+"+idx+"] & ~"+oldCellMaskInts[idx]+";");
+						replaceFunctionBody.push(tabs+"sfxDestroyMask.data["+idx+"] |= "+oldCellMaskInts[idx]+" & ~level.objects[index*STRIDE_OBJ+"+idx+"];");
+					}
+					for(var idx = 0; idx < STRIDE_MOV; idx++) {
+						replaceFunctionBody.push(tabs+"level.movements[index*STRIDE_MOV+"+idx+"] &= ~"+movementsClearedInts[idx]+";");
+						replaceFunctionBody.push(tabs+"level.movements[index*STRIDE_MOV+"+idx+"] |= "+movementsSetInts[idx]+";");
+						replaceFunctionBody.push(tabs+"changed = changed || (level.movements[index*STRIDE_MOV+"+idx+"] !== "+oldMovementMaskInts[idx]+");");
+					}
+					replaceFunctionBody.push(tabs+"return changed;");
+					cellReplaceFunctions.push(
+						"function "+prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci+"(index) {\n" +
+							(replaceFunctionBody.
+								concat(replaceFunctionPost)).
+							join("\n") +
+						"\n}"
+					);
+				}
+			}
+			var matchFunctions = [];
+			for(var pm = 0; pm < rule.patterns.length; pm++) {
+				var isEllipsis = rule.isEllipsis[pm];
+				var fnName = prefix+"match_"+i+"_"+j+"_"+pm;
+				var delta = dirMasksDelta[dir];
+				var tabs = "\t";
+				var matchFunctionBody = [];
+				matchFunctionBody.push(tabs+"var d = "+delta[1]+"+"+delta[0]+"*level.height;");
+				matchFunctionBody.push(tabs+"var idx = i;");
+				matchFunctionBody.push(tabs+"var movs;");
+				var requiredObjs = [];
+				for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
+					var cell = rule.patterns[pm][ci];
+					if(cell === ellipsisPattern) {
+						matchFunctionBody.push(tabs+"idx += (k-1)*d;");
+					} else {
+						var patternBody = [];
+						for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+							var op = cell.objectsPresent.data[idx];
+							var om = cell.objectsMissing.data[idx];
+							var objectsCheck = "";
+							if(op) {
+								if(op & (op-1)) {
+									objectsCheck += '((objs'+ci+'_'+idx+' & ' + op + ') === ' + op + ')';
+								} else {
+									objectsCheck += '(objs'+ci+'_'+idx+' & ' + op + ')';
+								}
+							}
+							if(om) {
+								if(objectsCheck.length) { objectsCheck += " && "; }
+								objectsCheck += '!(objs'+ci+'_'+idx+'' + ' & ' + om + ')';
+							}
+							if(objectsCheck.length) {
+								requiredObjs.push(idx);
+								patternBody.push(tabs+"if(!("+objectsCheck+")) { return false; }");
+							}
+						}
+						var anyObjectsCheck = "";
+						for (var any = 0; any < cell.anyObjectsPresent.length; any++) {
+							var anyHere = "";
+							for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+								var aop = cell.anyObjectsPresent[any].data[idx];
+								if(aop) {
+									if(anyHere.length) { anyHere += " | "; }
+									if(requiredObjs.indexOf(idx) == -1) {
+										requiredObjs.push(idx);
+									}
+									anyHere += "(objs"+ci+"_"+idx+" & "+aop+")";
+								}
+							}
+							if(anyObjectsCheck.length) {
+								anyObjectsCheck += " && ";
+							}
+							anyObjectsCheck += "("+anyHere+")";
+						}
+						if(anyObjectsCheck.length) {
+							patternBody.push("if(!("+anyObjectsCheck+")) { return false; }");
+						}
+						
+						for(var idx = 0; idx < STRIDE_MOV; idx++) {
+							var mp = cell.movementsPresent.data[idx];
+							var mm = cell.movementsMissing.data[idx];
+							var movementsCheck = "";
+							if(mp) {
+								if(mp & (mp-1)) {
+									movementsCheck += '((movs & ' + mp + ') === ' + mp + ')';
+								} else {
+									movementsCheck += '(movs & ' + mp + ')';
+								}
+							}
+							if(mm) {
+								if(movementsCheck.length) { movementsCheck += " && "; }
+								movementsCheck += '!(movs' + ' & ' + mm + ')';
+							}
+							if(movementsCheck.length) {
+								patternBody.push(tabs+"movs = level.movements[idx * "+STRIDE_MOV+" + "+idx+"];");
+								patternBody.push(tabs+"if(!("+movementsCheck+")) { return false; }");
+							}
+						}
+						for(var required = 0; required < requiredObjs.length; required++) {
+							var idx = requiredObjs[required];
+							patternBody.unshift(tabs+"var objs"+ci+"_"+idx+" = level.objects[idx * "+STRIDE_OBJ+" + "+idx+"];");
+						}
+						matchFunctionBody = matchFunctionBody.concat(patternBody);
+					}
+					if(ci < rule.patterns[pm].length-1) {
+						matchFunctionBody.push(tabs+"idx += d;");
+					}
+				}
+				matchFunctions.push(
+					"function "+fnName+"(i"+(isEllipsis?", k":"")+") {\n"+
+						matchFunctionBody.join("\n") + "\n" +
+						"\treturn true;" +
+					"\n}"
+				);
+			}
+			
+			window.eval(
+				ruleFunction + "\n" +
+				cellReplaceFunctions.join("\n") + "\n" + 
+				matchFunctions.join("\n") + "\n"
 			);
+			rule.tryApplyFn = window[prefix+"rule"+i+"_"+j];
 		}
 	}
 }

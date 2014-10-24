@@ -1,6 +1,6 @@
 'use strict';
 
-var global = window || this;
+var global = this;
 
 function isColor(str) {
 	str = str.trim();

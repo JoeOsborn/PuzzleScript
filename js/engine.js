@@ -12,7 +12,7 @@ z to undo, r to restart...........
 */
 
 //TODO: can remove this once random rule groups have code gen
-var global = window || this;
+var global = this;
 
 var RandomGen = new RNG();
 

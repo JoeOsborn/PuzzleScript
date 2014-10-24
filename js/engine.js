@@ -11,6 +11,9 @@ x to action.......................
 z to undo, r to restart...........
 */
 
+//TODO: can remove this once random rule groups have code gen
+var global = window || this;
+
 var RandomGen = new RNG();
 
 var intro_template = [
@@ -745,7 +748,7 @@ function restoreLevel(lev) {
 	}
 	
 	againing=false;
-	level.commandQueue=[];
+	clearCommands();
 }
 
 var zoomscreen=false;
@@ -774,7 +777,7 @@ function DoRestart(force) {
     	processInput(-1,true);
 	}
 	
-	level.commandQueue=[];
+	clearCommands();
 }
 
 function DoUndo(force) {
@@ -946,7 +949,6 @@ function Level(lineNumber, width, height, layerCount, objects) {
 	this.n_tiles = width * height;
 	this.objects = objects;
 	this.layerCount = layerCount;
-	this.commandQueue = [];
 	this.rigidGroupIndexMask = [];
 	this.rigidMovementAppliedMask = [];
 }
@@ -1119,37 +1121,6 @@ BitVec.prototype.anyBitsInCommon = function(other) {
 	return !this.bitsClearInArray(other.data);
 }
 
-//A dummy tryApply function in case we can't compile this rule yet.
-//This is also important to help keep the size/layout of Rule objects
-//the same.
-function interpretedTryApplyFn(rule) {
-	var delta = dirMasksDelta[rule.direction];
-	
-	var anyMatches = false;
-	var anyApplications = false;
-	this.findAndApply([], function(matches) {
-		anyMatches = true;
-		anyMatchesThisTime = true;
-		if(rule.hasReplacements) {
-			var tuples = generateTuples(matches);
-			for (var tupleIndex=0;tupleIndex<tuples.length;tupleIndex++) {
-				var tuple = tuples[tupleIndex];
-				//replacements of later patterns/ellipses can invalidate earlier-found
-				//matches, so if there's more than one pattern (or if there are ellipses
-				//and this is not the first match), we must always verify that the match
-				//is still sound.
-				var shouldCheck = rule.patterns.length > 1 || tupleIndex > 0;
-				var success = rule.applyAt(delta,tuple,shouldCheck);
-				anyApplications = success || anyApplications;
-			}
-		}
-	});
-	if(anyMatches) {
-		rule.queueCommands();
-	}
-	return anyApplications;	
-};
-
 function Rule(rule) {
 	this.direction = rule[0]; 		/* direction rule scans in */
 	this.patterns = rule[1];		/* lists of CellPatterns to match */
@@ -1162,7 +1133,7 @@ function Rule(rule) {
 	this.isRandom = rule[8];
 	this.cellRowMasks = rule[9];
 	this.cellRowMatches = [];
-	this.tryApplyFn = interpretedTryApplyFn;
+	this.tryApplyFn = null;
 	for (var i=0;i<this.patterns.length;i++) {
 		this.cellRowMatches.push(this.generateCellRowMatchesFunction(this.patterns[i],this.isEllipsis[i]));
 	}
@@ -2054,29 +2025,6 @@ Rule.prototype.tryApply = function() {
 	// }
 };
 
-Rule.prototype.queueCommands = function() {
-	var commands = this.commands;
-	for(var i=0;i<commands.length;i++) {
-		var command=commands[i];
-		var already=false;
-		if (level.commandQueue.indexOf(command[0])>=0) {
-			continue;
-		}
-		level.commandQueue.push(command[0]);
-
-		if (verbose_logging){
-			var lineNumber = this.lineNumber;
-			var ruleDirection = dirMaskName[this.direction];
-			var logString = '<font color="green">Rule <a onclick="jumpToLine(' + lineNumber.toString() + ');"  href="javascript:void(0);">' + lineNumber.toString() + '</a> triggers command '+command[0]+'.</font>';
-			consolePrint(logString);
-		}
-
-		if (command[0]==='message') {			
-			messagetext=command[1];
-		}		
-	}
-};
-
 function showTempMessage() {
 	keybuffer=[];
 	textMode=true;
@@ -2088,6 +2036,7 @@ function showTempMessage() {
 	canvasResize();
 }
 
+//TODO: do code gen for applyRandomRuleGroup.
 function applyRandomRuleGroup(ruleGroup) {
 	var propagated=false;
 
@@ -2117,7 +2066,17 @@ function applyRandomRuleGroup(ruleGroup) {
 	var check=false;
 	var modified = rule.applyAt(delta,tuple,check);
 
-   	rule.queueCommands();
+	for(var c=0;c<rule.commands.length;c++) {
+		var cmd = rule.commands[c];
+		global["cmd_"+cmd[0]] = true;
+		if(cmd[0] == "message") {
+			messagetext = cmd[1];
+		}
+		if(verbose_logging) {
+			var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
+			consolePrint(logMessage);
+		}
+	}
 
 	return modified;
 }
@@ -2310,7 +2269,7 @@ function processInput(inputDir,dontCheckWin,dontModify) {
 		}
 	}
 
-	level.commandQueue=[];
+	clearCommands();
 	var bak = backupLevel();
 	var dir = inputDir >= 0 && inputDir <= 4 ? dirToBits(inputDir) : inputDir;
 	var playerPositions = getPlayerPositions();
@@ -2341,7 +2300,7 @@ function processInput(inputDir,dontCheckWin,dontModify) {
 	}
 	
 	//cancel or restart
-	if (level.commandQueue.indexOf('cancel')>=0) {	
+	if (cmd_cancel) {
 		if (verbose_logging) { 
 			consolePrint('CANCEL command executed, cancelling turn.');
 			consoleCacheDump();
@@ -2351,7 +2310,7 @@ function processInput(inputDir,dontCheckWin,dontModify) {
 		return false;
 	} 
 
-	if (level.commandQueue.indexOf('restart')>=0) {
+	if (cmd_restart) {
 		if (verbose_logging) { 
 			consolePrint('RESTART command executed, reverting to restart state.');
 			consoleCacheDump();
@@ -2362,7 +2321,7 @@ function processInput(inputDir,dontCheckWin,dontModify) {
 	}
 	
 	//handle the dontModify case
-	if (dontModify && level.commandQueue.indexOf('win')>=0) {
+	if (dontModify && cmd_win) {
 		return true;
 	}
 	
@@ -2487,27 +2446,22 @@ function handleCommands(modified) {
 		}
 	}
 
-	for (var i=0;i<level.commandQueue.length;i++) {
-		var command = level.commandQueue[i];
-		if (command.charAt(1)==='f')	{//identifies sfxN
-			tryPlaySimpleSound(command);
-		}		
-		if (unitTesting===false) {
-			if (command==='message') {
-				showTempMessage();
-			}
+	if (unitTesting===false) {
+		playSFXCommands();
+		if (cmd_message) {
+			showTempMessage();
 		}
 	}
 
 	if (!winning) {
-		if (level.commandQueue.indexOf('checkpoint')>=0) {
+		if (cmd_checkpoint) {
 			if (verbose_logging) { 
 				consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
 			}
 			restartTarget=backupLevel();
 		}	 
 
-		if (level.commandQueue.indexOf('again')>=0 && modified) {
+		if (cmd_again && modified) {
 			//first have to verify that something's changed
 			var old_verbose_logging=verbose_logging;
 			var oldmessagetext = messagetext;
@@ -2531,7 +2485,7 @@ function handleCommands(modified) {
 			messagetext = oldmessagetext;
 		}		
 	}
-	level.commandQueue=[];
+	clearCommands();
 
 	return modified;
 }
@@ -2542,7 +2496,7 @@ function checkWin() {
 		return;
 	}
 
-	if (level.commandQueue.indexOf('win')>=0) {
+	if (cmd_win) {
 		consolePrint("Win Condition Satisfied");
 		DoWin();
 		return;

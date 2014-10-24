@@ -1,5 +1,6 @@
 'use strict';
 
+var global = window || this;
 
 function isColor(str) {
 	str = str.trim();
@@ -2470,6 +2471,22 @@ function loadFile(str) {
 	compileRules(state,state.rules,"");
 	compileRules(state,state.lateRules,"late_");
 
+	var cmds = [];
+	var clearCmds = [];
+	var playSfx = [];
+	clearCmds.push("function clearCommands() {");
+	playSfx.push("function playSFXCommands() {");
+	for(var i = 0; i < commandwords.length; i++) {
+		cmds.push("var cmd_"+commandwords[i]+" = false;");
+		clearCmds.push("\tcmd_"+commandwords[i]+" = false;");
+		if(commandwords[i][1] == "f") {
+			playSfx.push("\tif(cmd_"+commandwords[i]+") { tryPlaySimpleSound(\""+commandwords[i]+"\"); }");
+		}
+	}
+	clearCmds.push("}\n");
+	playSfx.push("}\n");
+	global.eval((cmds.concat(clearCmds).concat(playSfx)).join("\n"));
+
 	generateSoundData(state);
 
 	formatHomePage(state);
@@ -2727,10 +2744,10 @@ function compileRules(state,rules,prefix) {
 								}
 							}
 						}
-						functionBody.push(tabs+"if(result && verbose_logging) { consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[dir] + " applied.</font>'); }");
-						
-						
-						functionBody.push(tabs+"if(result && applyAtWatchers && applyAtWatchers.length) {");
+						if(verbose_logging) {
+							functionBody.push(tabs+"if(result) { consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[dir] + " applied.</font>'); }");
+						}
+						functionBody.push(tabs+"if(result && applyAtWatchers) {");
 						functionBody.push(tabs+"\tfor(var w = 0; w < applyAtWatchers.length; w++) {");
 						functionBody.push(tabs+"\t\tapplyAtWatchers[w](rule,"+i+","+j+","+dir+");");
 						functionBody.push(tabs+"\t}");
@@ -2739,12 +2756,25 @@ function compileRules(state,rules,prefix) {
 					}
 				}
 			}
+			var queueCommands = [];
+			if(rule.commands && rule.commands.length) {
+				queueCommands.push("\tif(anyMatches) {");
+				for(var c=0;c<rule.commands.length;c++) {
+					var cmd = rule.commands[c];
+					queueCommands.push("\t\tcmd_"+cmd[0]+" = true;");
+					if(cmd[0] == "message") { queueCommands.push("\t\tmessagetext = \""+cmd[1].replace(/\"/g,"\\\"")+"\";"); }
+					if(verbose_logging) {
+						var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
+						queueCommands.push("\t\tconsolePrint('"+logMessage+"');");
+					}
+				}
+				queueCommands.push("\t}");
+			}
 			var ruleFunction = 
 				"function "+prefix+"rule"+i+"_"+j+"(rule) {\n"+
 					(functionBody.
 						concat(functionPost).
-						//TODO: inline queueCommands
-						concat(["\tif(anyMatches) { rule.queueCommands(); }"]).
+						concat(queueCommands).
 						concat(rule.hasReplacements ? ["\treturn anyApplications;"] : ["\treturn false;"])).
 					join("\n")+
 				"\n}";
@@ -2769,7 +2799,7 @@ function compileRules(state,rules,prefix) {
 					var oldMovementMaskInts = [];
 					replaceFunctionBody.push(tabs+"var colIndex=(index/level.height)|0;");
 					replaceFunctionBody.push(tabs+"var rowIndex=(index%level.height)|0;");	
-					//TODO: avoid generating code for masks that are always zero				
+					//TODO: avoid generating code for masks that are always zero. note that this must play nice with random too!	
 					for(var idx = 0; idx < STRIDE_OBJ; idx++) {
 						objectsClearedInts.push("objectsCleared"+idx);
 						replaceFunctionBody.push(tabs+"var "+objectsClearedInts[idx]+" = "+replace.objectsClear.data[idx]+";");
@@ -2976,12 +3006,17 @@ function compileRules(state,rules,prefix) {
 					"\n}"
 				);
 			}
-			(window || global).eval(
-				ruleFunction + "\n" +
-				cellReplaceFunctions.join("\n") + "\n" + 
-				matchFunctions.join("\n") + "\n"
-			);
-			rule.tryApplyFn = (window || global)[prefix+"rule"+i+"_"+j];
+			try {
+				global.eval(
+					ruleFunction + "\n" +
+					cellReplaceFunctions.join("\n") + "\n" + 
+					matchFunctions.join("\n") + "\n"
+				);
+				rule.tryApplyFn = global[prefix+"rule"+i+"_"+j];
+			} catch(e) {
+				console.log("failed! "+e);
+				throw e;
+			}
 		}
 	}
 }

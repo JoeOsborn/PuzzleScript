@@ -78,21 +78,21 @@ var SolverFreeMove = (function() {
 		WAIT_ALLOWED = autotickinterval > 0;
 		
 		PLAYER_MASK = state.playerMask.clone();
-    for (var i in state.objects) {
-			var o = state.objects[i];
-			var annos = annotationsBetween(o.lineNumber, state.objects[i+1] ? state.objects[i+1].lineNumber-1 : Infinity);
-			var isDeco = annos.indexOf("DECO") != -1;
-			if(!isDeco && 
-			   !(PLAYER_MASK.get(o.id)) && 
-			   !state.layerMasks[state.backgroundlayer].get(o.id)) {
-				INTERESTING.ibitset(o.id);
-			}
-			if((!isDeco || on player layer(o.id)) && 
-			   !(PLAYER_MASK.get(o.id)) && 
-			   !state.layerMasks[state.backgroundlayer].get(o.id)) {
-				OBSTRUCTING.ibitset(o.id);
-			}
-		}
+    // for (var i in state.objects) {
+// 			var o = state.objects[i];
+// 			var annos = annotationsBetween(o.lineNumber, state.objects[i+1] ? state.objects[i+1].lineNumber-1 : Infinity);
+// 			var isDeco = annos.indexOf("DECO") != -1;
+// 			if(!isDeco &&
+// 			   !(PLAYER_MASK.get(o.id)) &&
+// 			   !state.layerMasks[state.backgroundlayer].get(o.id)) {
+// 				INTERESTING.ibitset(o.id);
+// 			}
+// 			if((!isDeco || on player layer(o.id)) &&
+// 			   !(PLAYER_MASK.get(o.id)) &&
+// 			   !state.layerMasks[state.backgroundlayer].get(o.id)) {
+// 				OBSTRUCTING.ibitset(o.id);
+// 			}
+// 		}
 
 		open = initSet();
 		closed = initSet();
@@ -153,6 +153,7 @@ var SolverFreeMove = (function() {
 		}
 		return {continuation:0};
 	};
+	
 	
 	function hasPredecessor(node,pred,predAction) {
 		for(var pi = 0; pi < node.predecessors.length; pi++) {
@@ -357,21 +358,31 @@ var SolverFreeMove = (function() {
 		}
 	};
 
-	var tempCentroids;
-	function findDenormCentroids(into) {
-		if(!into || into.length != state.objectCount) { into = new Int32Array(state.objectCount); }
-		for(var i = 0; i < into.length; i++) {
-			into[i] = 0;
-		}
-		for(i = 0; i < level.n_tiles; i++) {
-			var bitmask = level.getCellInto(i,_oA);
-			for(var bit = 0; bit < state.objectCount; ++bit) {
-				if(bitmask.get(bit)) {
-					into[bit] += i;
-				}
+	function hashKey() {
+		var h = 0|0;
+		var l = STRIDE_OBJ;
+		var tiles = level.n_tiles;
+		for(i = 0; i < tiles; i++) {
+			var bitmask = level.getCellInto(i,_oA).data;
+			for(var d = 0; d < l; d++) {
+				h += (bitmask[d]&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+				h += ((bitmask[d]>>8)&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+				h += ((bitmask[d]>>16)&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+				h += ((bitmask[d]>>24)&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
 			}
 		}
-		return into;
+		h += ( h << 3 )|0;
+		h ^= ( h >> 11 )|0;
+		h += ( h << 15 )|0;
+		return h;
 	}
 
 	var tempNode = {
@@ -382,15 +393,14 @@ var SolverFreeMove = (function() {
 		firstPrefix:[],
 		winning:false,
 		eventualSolutions:[],
-		//indexing optimization:
-		keys:tempCentroids,
+		key:0,
 		f:0, g:0, h:0
 	};
 
 	function createOrFindNode(pred, action) {
-		tempCentroids = findDenormCentroids(tempCentroids);
+		var key = hashKey();
 		tempNode.winning = winning;
-		tempNode.keys = tempCentroids;
+		tempNode.key = key;
 		var existingInClosed = member(tempNode,closed);
 		var existingInOpen = existingInClosed ? null : member(tempNode,open);
 		var existingN = existingInClosed || existingInOpen;
@@ -431,7 +441,7 @@ var SolverFreeMove = (function() {
 			winning:winning,
 			eventualSolutions:[],
 			//indexing optimization:
-			keys:new Int32Array(tempCentroids),
+			key:key,
 			f:g+h, g:g, h:h
 		};
 		nodeId++;
@@ -594,19 +604,15 @@ var SolverFreeMove = (function() {
 	}
 	
 	function getInnerSet(node,set) {
-		var innerSet = set;
-		var ocs = node.keys;
-		for(var i = 0; i < ocs.length; i++) {
-			if(!innerSet[ocs[i]]) {
-				innerSet[ocs[i]] = (i == ocs.length - 1) ? [] : {};
-			}
-			innerSet = innerSet[ocs[i]];
+		if(!(node.key in set)) {
+			set[node.key] = [];
 		}
-		return innerSet;
+		return set[node.key];
 	}
 
 	function equiv(n1,n2) {
 		if(n1 == n2) { return true; }
+		if(n1.key != n2.key) { return false; }
 		if(n1.winning != n2.winning) { return false; }
 		var n1BakObjs = null;
 		if(n1.backup && n1.backup.dat) {

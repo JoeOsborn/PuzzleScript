@@ -13,7 +13,36 @@ var SolverFreeMove = (function() {
 	var ITERS_PER_CONTINUATION = 100000;
 	var ITER_MAX = 100000;
 	
-	var ACTIONS;	
+	var ACTION_ALLOWED=true;
+	var WAIT_ALLOWED=true;
+	
+	var INTERESTING, OBSTRUCTING;
+	var PLAYER_MASK;
+
+	function annotationsBetween(l1, l2) {
+		var annos = [];
+		for(var l = l1; l < l2; l++) {
+			var line = editor.getLine(l).trim();
+			var match = /\(\s*@(.*)\s*:\s*(.*)\s*\)/i.exec(line);
+			if(match) {
+				annos.push({
+					type:match[1].trim().toUpperCase(), 
+					content:match[2].trim(), 
+					line:l
+				});
+			} else {
+				match = /\(\s*@(.*).*\)/i.exec(line);
+				if(match) {
+					annos.push({
+						type:match[1].trim().toUpperCase(), 
+						content:null,
+						line:l
+					});
+				}
+			}
+		}
+		return annos;
+	}
 
 	var FIRST_SOLUTION_ONLY = true;
 	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
@@ -30,33 +59,39 @@ var SolverFreeMove = (function() {
 	var nodeId=0;
 	var open, closed, q;
 	var root;
-	var MODE = "fast";
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
+		INTERESTING = new BitVec(STRIDE_OBJ);
+		OBSTRUCTING = new BitVec(STRIDE_OBJ);
 		nodeId=0;
-		if(Solver.MODE == "fast") {
-			FIRST_SOLUTION_ONLY = true;
-			gDiscount = 1.0;
-			hDiscount = 1.0;
-		} else if(Solver.MODE == "fast_then_best") {
-			FIRST_SOLUTION_ONLY = false;
-			pauseAfterNextSolution = true;
-			gDiscount = 1.0;
-			hDiscount = 1.0;
-		}
+		FIRST_SOLUTION_ONLY = true;
+		gDiscount = 1.0;
+		hDiscount = 1.0;
 		
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
 			return {iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, fullyExhausted:true};
 		}
 
-		ACTIONS = [UP, DOWN, LEFT, RIGHT];
-		if(!('noaction' in state.metadata)) {
-			ACTIONS.push(ACTION);
-		}
-		if(autotickinterval > 0) {
-			ACTIONS.push(WAIT);
+		ACTION_ALLOWED = !('noaction' in state.metadata);
+		WAIT_ALLOWED = autotickinterval > 0;
+		
+		PLAYER_MASK = state.playerMask.clone();
+    for (var i in state.objects) {
+			var o = state.objects[i];
+			var annos = annotationsBetween(o.lineNumber, state.objects[i+1] ? state.objects[i+1].lineNumber-1 : Infinity);
+			var isDeco = annos.indexOf("DECO") != -1;
+			if(!isDeco && 
+			   !(PLAYER_MASK.get(o.id)) && 
+			   !state.layerMasks[state.backgroundlayer].get(o.id)) {
+				INTERESTING.ibitset(o.id);
+			}
+			if((!isDeco || on player layer(o.id)) && 
+			   !(PLAYER_MASK.get(o.id)) && 
+			   !state.layerMasks[state.backgroundlayer].get(o.id)) {
+				OBSTRUCTING.ibitset(o.id);
+			}
 		}
 
 		open = initSet();

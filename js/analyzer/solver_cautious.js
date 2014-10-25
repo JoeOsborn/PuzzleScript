@@ -20,7 +20,7 @@ var SolverCautious = (function() {
 	//Longer -> lower value for gDiscount
 	//For shortish games, maybe even set hDiscount=0
 	var hDiscount = 1.0;
-	var gDiscount = 1.0;
+	var gDiscount = 0.5;
 	var gLimit = Infinity;
 
 	var pauseAfterNextSolution = false;
@@ -39,12 +39,12 @@ var SolverCautious = (function() {
 		if(Solver.MODE == "fast") {
 			FIRST_SOLUTION_ONLY = true;
 			hDiscount = 1.0;
-			gDiscount = 1.0;
+			gDiscount = 0.5;
 		} else if(Solver.MODE == "fast_then_best") {
 			FIRST_SOLUTION_ONLY = false;
 			pauseAfterNextSolution = true;
 			hDiscount = 1.0;
-			gDiscount = 1.0;
+			gDiscount = 0.5;
 		}
 		
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {

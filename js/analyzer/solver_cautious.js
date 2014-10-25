@@ -38,16 +38,17 @@ var SolverCautious = (function() {
 		nodeId=0;
 		if(Solver.MODE == "fast") {
 			FIRST_SOLUTION_ONLY = true;
-			gDiscount = 1.0;
 			hDiscount = 1.0;
+			gDiscount = 1.0;
 		} else if(Solver.MODE == "fast_then_best") {
 			FIRST_SOLUTION_ONLY = false;
 			pauseAfterNextSolution = true;
-			gDiscount = 1.0;
 			hDiscount = 1.0;
+			gDiscount = 1.0;
 		}
 		
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
+			log("nope");
 			return {iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, fullyExhausted:true};
 		}
 
@@ -312,7 +313,15 @@ var SolverCautious = (function() {
 			h:currentNode.h,
 			f:currentNode.f,
 			prefixes:prefixes,
-			ruleCounts:prefixes.map(function(p){ return Solver.getRuleCounts(p)[Solver.LEVEL][Utilities.RC_CATEGORY_WIN]; }),
+			ruleCounts:prefixes.map(function(p){ 
+				var counts = Solver.getRuleCounts(p)[Solver.LEVEL];
+				//HACK: For some bizarre reason, counts is sometimes null.
+				if(!counts) {
+					warn("Uh oh, null counts for level "+Solver.LEVEL+" prefix "+p.join(",")+" all counts="+JSON.stringify(Solver.getRuleCounts(p)));
+					return [];
+				}
+				return counts;
+			}),
 			iteration:iter,
 			time:Solver.timeSinceStart()
 		});

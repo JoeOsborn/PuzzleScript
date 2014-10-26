@@ -10,8 +10,8 @@ var SolverCautious = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 
-	var ITERS_PER_CONTINUATION = 100000;
-	var ITER_MAX = 100000;
+	var ITERS_PER_CONTINUATION = 400000;
+	var ITER_MAX = 400000;
 	
 	var ACTIONS;	
 
@@ -81,7 +81,6 @@ var SolverCautious = (function() {
 			var hint = config.hint;
 			for(var hi=0; hi < hint.prefixes.length; hi++) {
 				var node = root;
-				var newNodes = new Array(ACTIONS.length);
 				for(var ai=0; ai < hint.prefixes[hi].length; ai++) {
 					if(q.length==0) {
 						log("Got a win earlier than expected");
@@ -91,12 +90,11 @@ var SolverCautious = (function() {
 					q.removeItem(node);
 					remove(node,open);
 					insert(node,closed);
-					expand(0,node,newNodes);
-					//of the last set of new nodes, find the one whose predecessor-action pair is the previous node and the current action
-					for(var ni=0; ni < newNodes.length; ni++) {
-						if(!newNodes[ni]) { continue; }
-						if(hasPredecessor(newNodes[ni],node,hint.prefixes[hi][ai])) {
-							node = newNodes[ni];
+					var newNode;
+					while(newNode = expand(0, node)) {
+						//of the last set of new nodes, find the one whose predecessor-action pair is the previous node and the current action
+						if(hasPredecessor(newNode,node,hint.prefixes[hi][ai])) {
+							node = newNode;
 							//log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
 							break;
 						}
@@ -165,16 +163,28 @@ var SolverCautious = (function() {
 		for(var iter=continuation; iter<continuation+ITERS_PER_CONTINUATION && iter<ITER_MAX && q.length > 0; iter++) {
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
-			var node = q.shift();
+			var node = q.peek();
 			//because of weirdness with hints and our inability to delete items from the queue, our q might have noise in it.
-			if(node.visited) { continue; }
-			if(member(node,closed)) { warn("found a closed node "+node.id); continue; }
+			if(node.actions.length == 0) { 
+				q.shift();
+				continue; 
+			}
+			if(member(node,closed)) { 
+				warn("found a closed node "+node.id); 
+				continue; 
+			}
 			//log("Dat:"+JSON.stringify(node.backup));
-			exactRemove(node,open);
-			exactInsert(node,closed);
 			//just close nodes with best paths longer than or equal to gLimit.
-			if(node.g >= gLimit) { continue; }
-			expand(iter,node,null);
+			if(node.g >= gLimit) { 
+				q.shift();
+				continue;
+			}
+			expand(iter,node);
+			if(node.actions.length == 0) {
+				//Don't shift here! The first element in the queue might have changed!
+				exactRemove(node,open);
+				exactInsert(node,closed);
+			}
 			if(pauseAfterNextSolution && sentSolution) {
 				sentSolution = false;
 				pauseAfterNextSolution = false;
@@ -210,54 +220,49 @@ var SolverCautious = (function() {
 			};
 		}
 	}
-	function expand(iter,node,track) {
-		node.visited = true;
-		//for each action valid in the game:
-		for(var ai = 0; ai < ACTIONS.length; ai++) {
-			var action = ACTIONS[ai];
-			//switch to this state, perform action, createOrFindNode()
-			switchToSearchState(node);
-			processInput(action,false,false,node.backup);
-			while(againing) {
-				processInput(-1);
+	var AGAIN_LIMIT = 10;
+	function expand(iter,node) {
+		var action = node.actions.pop();
+		//switch to this state, perform action, createOrFindNode()
+		switchToSearchState(node);
+		processInput(action,false,false,node.backup);
+		var againIters = 0;
+		while(againing && againIters < AGAIN_LIMIT) {
+			processInput(-1);
+			againIters++;
+		}
+		if(againIters >= AGAIN_LIMIT) {
+			warn("Too many again loops");
+		}
+		var currentNode = createOrFindNode(node,action);
+		//log("Found "+currentNode.id+" by "+node.id +":"+action);
+		//if this is winning, report a win
+		if(winning) {
+			//log("WIN");
+			postSolution(currentNode, iter);
+			
+			if(FIRST_SOLUTION_ONLY) {
+				q = new priority_queue.PriorityQueue();
+				open = initSet();
+				closed = initSet();
+				return currentNode;
 			}
-			var currentNode = createOrFindNode(node,action);
-			if(track) {
-				track[ai] = currentNode;
-			}
-			//log("Found "+currentNode.id+" by "+node.id +":"+action);
-			//if this is winning, report a win
-			if(winning) {
-				//log("WIN");
-				postSolution(currentNode, iter);
-				
-				if(FIRST_SOLUTION_ONLY) {
-					q = new priority_queue.PriorityQueue();
-					open = initSet();
-					closed = initSet();
-					if(track) {
-						for(var aj = ai; aj < ACTIONS.length; aj++) {
-							track[aj] = null;
-						}
-					}
-					return;
-				}
-				
-				//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!
-				addEventualSolution(currentNode.predecessors,currentNode);
-			} else if(currentNode != root &&
-							  currentNode.predecessors.length == 1) {
-				//log("enQ "+currentNode.id);
-				enqueueNode(currentNode);
-			} else if(currentNode.eventualSolutions.length) {
-				//log("Eventual win");
-				for(var esi in currentNode.eventualSolutions) {
-					var es = currentNode.eventualSolutions[esi];
-					postSolution(es,iter);
-					addEventualSolution([{action:action, predecessor:node}],es);
-				}
+			
+			//for each predecessor up the chain, if it has no eventualSolutions it definitely does now!
+			addEventualSolution(currentNode.predecessors,currentNode);
+		} else if(currentNode != root &&
+						  currentNode.predecessors.length == 1) {
+			//log("enQ "+currentNode.id);
+			enqueueNode(currentNode);
+		} else if(currentNode.eventualSolutions.length) {
+			//log("Eventual win");
+			for(var esi in currentNode.eventualSolutions) {
+				var es = currentNode.eventualSolutions[esi];
+				postSolution(es,iter);
+				addEventualSolution([{action:action, predecessor:node}],es);
 			}
 		}
+		return currentNode;
 	}
 
 	function addEventualSolution(nodePreds,s) {
@@ -360,7 +365,7 @@ var SolverCautious = (function() {
 
 	var tempNode = {
 		id:-1,
-		visited:false,
+		actions:[],
 		backup:{},
 		predecessors:[],
 		firstPrefix:[],
@@ -407,7 +412,7 @@ var SolverCautious = (function() {
 		var h = calculateH()*hDiscount;
 		var n = {
 			id:nodeId,
-			visited:false,
+			actions:ACTIONS.slice(),
 			backup:backupLevel(),
 			predecessors:pred ? [{action:action, predecessor:pred}] : [],
 			firstPrefix:pred ? pred.firstPrefix.slice() : [],

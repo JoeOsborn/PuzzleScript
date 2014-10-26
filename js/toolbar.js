@@ -1,13 +1,13 @@
 function memTestClick() {
 	clearConsole();
 	if(window.Analyzer) { window.Analyzer.mode = window.Analyzer.MODE_MEM_TEST; }
-	compile(["restart"]);
+	compileAndAnalyze(["restart"]);
 	if(window.Analyzer) { window.Analyzer.mode = window.Analyzer.MODE_NORMAL; }
 }
 
 function runClick() {
 	clearConsole();
-	compile(["restart"]);
+	compileAndAnalyze(["restart"]);
 }
 
 function dateToReadable(title,time) {
@@ -95,7 +95,7 @@ function loadDropDownChange() {
 			var loadDropdown = document.getElementById('loadDropDown');
 			loadDropdown.selectedIndex=0;
 			unloadGame();
-			compile(["restart"]);
+			compileAndAnalyze(["restart"]);
 			return;
 	    }
 	}		
@@ -142,7 +142,7 @@ loadDropdown.selectedIndex=0;
 
 function levelEditorClick_Fn() {
 	if (textMode || state.levels.length===0) {
-		compile(["loadLevel",0]);
+		compileAndAnalyze(["loadLevel",0]);
 		levelEditorOpened=true;
     	canvasResize();
 	} else {
@@ -158,7 +158,7 @@ function shareClick() {
 	if (state.metadata.title!==undefined) {
 		title=state.metadata.title + " PuzzleScript Script";
 	}
-	compile();
+	compileAndAnalyze();
 
 
 	var source=editor.getValue();
@@ -218,7 +218,7 @@ function shareClick() {
 
 function rebuildClick() {
 	clearConsole();
-	compile(["rebuild"],undefined,RandomGen);
+	compileAndAnalyze(["rebuild"],undefined,RandomGen);
 }
 
 function post_to_url(path, params, method) {
@@ -248,7 +248,7 @@ function post_to_url(path, params, method) {
 function exportClick() {
 	var sourceCode = editor.getValue();
 
-	compile("restart");
+	compileAndAnalyze("restart");
 
 	var sourceString = JSON.stringify(sourceCode);
 	

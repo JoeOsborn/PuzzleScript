@@ -1,5 +1,12 @@
 'use strict';
 
+function compileAndAnalyze(cmd, lev, seed) {
+	compile(cmd, lev, seed);
+	if(window && window.Analyzer) {
+		window.Analyzer.analyze(cmd,lev,seed);
+	}
+}
+
 var Analyzer = (function() {
 	var module = {};
 	
@@ -8,7 +15,8 @@ var Analyzer = (function() {
 	
 	module.mode = module.MODE_NORMAL;
 	
-	var USE_WORKERS = true;
+	var USE_WORKERS = false;
+	var RANDOM_RESTART = false;
 	var INPUT_MAPPING = {};
 	INPUT_MAPPING[-1]="WAIT";
 	INPUT_MAPPING[0]="UP";
@@ -291,7 +299,7 @@ var Analyzer = (function() {
 	};
 	
 	function clearLineHighlights() {
-		console.log("Clear line highlights "+JSON.stringify(lineHighlights));
+		//console.log("Clear line highlights "+JSON.stringify(lineHighlights));
 		for(var l in lineHighlights) {
 			editor.removeLineClass(parseInt(l), "background", lineHighlights[l]);
 		}
@@ -305,7 +313,7 @@ var Analyzer = (function() {
 				var upTo = nextEmptyLine(state.levels[i].lineNumber);
 				var solClass = seenSolutions[i].solved ? solvedClass :
 					(seenSolutions[i].exhaustive ? unsolvableClass : unsolvedClass);
-				console.log("highlight "+state.levels[i].lineNumber+".."+upTo+" with "+solClass);
+				//console.log("highlight "+state.levels[i].lineNumber+".."+upTo+" with "+solClass);
 				for(var l = state.levels[i].lineNumber-1; l < upTo; l++) {
 					editor.removeLineClass(l, "background", solvedClass);
 					editor.removeLineClass(l, "background", unsolvedClass);
@@ -495,6 +503,7 @@ var Analyzer = (function() {
 				verbose:true
 			}, handleSolver, tickLevelQueue);
 		} else {
+			workers[lev] = {init: { rules:gameRules, level:lev, mode:"fast", hint:hint, verbose:true }};
 			Solver.startSearch({
 				rules:gameRules,
 				level:lev,
@@ -503,7 +512,7 @@ var Analyzer = (function() {
 				//seed:randomseed,
 				verbose:true,
 				replyFn:function(type,msg) {
-					console.log("MSG:"+type+":"+JSON.stringify(msg));
+					//console.log("MSG:"+type+":"+JSON.stringify(msg));
 					switch(type) {
 						case "busy":
 							setTimeout(function() {
@@ -583,7 +592,7 @@ var Analyzer = (function() {
 				consolePrint("Level "+data.level+": Did not find more solutions after "+data.response.iterations+" iterations ("+data.time+" seconds)");
 				if(!seenSolutions[data.level] || seenSolutions[data.level].stale) {
 					recordFailure(workers[id].init.rules, workers[id].init.levelText, data);
-					if(!data.response.fullyExhausted) {
+					if(!data.response.fullyExhausted && RANDOM_RESTART) {
 						levelQueue.push(data.level);
 						consolePrint("Level "+data.level+" is taking some time to solve.");
 					} else {
@@ -733,10 +742,10 @@ var Analyzer = (function() {
 			level:state.levels[level],
 			solved:false,
 			stale:false,
-			prefixes:data.kickstart,
+			prefixes:data.response.kickstart,
 			steps:[],
-			iteration:data.iteration,
-			exhaustive:data.queueLength == 0,
+			iteration:data.response.iterations,
+			exhaustive:data.response.fullyExhausted,
 			f:-1, g:-1, h:-1
 		};
 		updateLevelHighlights();

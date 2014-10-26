@@ -47,7 +47,7 @@ editor.on('mousedown', function(cm, event) {
     if (event.ctrlKey||event.metaKey) {
       document.activeElement.blur();  // unfocus code panel
       event.preventDefault();         // prevent refocus
-      compile(["levelline",cm.posFromMouse(event).line]);
+      compileAndAnalyze(["levelline",cm.posFromMouse(event).line]);
     }
   }
 });
@@ -143,7 +143,7 @@ function tryLoadGist(id) {
 			if(Analyzer) {
 				Analyzer.clear();
 			}
-			compile(["restart"],code);
+			compileAndAnalyze(["restart"],code);
 		}
 	}
 	githubHTTPClient.setRequestHeader("Content-type","application/x-www-form-urlencoded");
@@ -165,7 +165,7 @@ function tryLoadFile(fileName) {
 		if(Analyzer) {
 			Analyzer.clear();
 		}
-		compile(["restart"]);
+		compileAndAnalyze(["restart"]);
 	}
 	fileOpenClient.send();
 }

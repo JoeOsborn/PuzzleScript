@@ -8,7 +8,7 @@ var Solver = (function() {
 	}
 
 	module.VERBOSE = false;
-	module.REPLY_FN = reply;
+	module.REPLY_FN = null;
 	var OLD_TESTING, OLD_AUTO_ADVANCE;
 	
 	module.START_TIME = 0;
@@ -26,11 +26,11 @@ var Solver = (function() {
 		module.MODE = config.mode || mode;
 		if(config.replyFn) {
 			module.REPLY_FN = config.replyFn;
+		} else {
+			module.REPLY_FN = reply;
 		}
 		module.START_TIME = module.now();
-		if(!window) {
-			compile(["loadLevel", Solver.LEVEL], Solver.RULES, Solver.SEED);
-		}
+		compile(["loadLevel", Solver.LEVEL], Solver.RULES, Solver.SEED);
 		
 		module.INIT_LEVEL = backupLevel();
 		

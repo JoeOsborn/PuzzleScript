@@ -59,9 +59,7 @@ var MemoryTest = (function() {
 		}
 		START_TIME = performance.now();
 
-		if(!window) {
-			compile(["loadLevel", LEVEL], RULES, SEED);
-		}
+		compile(["loadLevel", LEVEL], RULES, SEED);
 		
 		state.sfx_Events = {};
 		state.sfx_CreationMasks = [];

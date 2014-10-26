@@ -9,6 +9,14 @@ var SolverCautious = (function() {
 	var DOWN = 2;
 	var RIGHT = 3;
 	var ACTION = 4;
+	
+	var OPPOSITE_ACTIONS = {};
+	OPPOSITE_ACTIONS[UP] = DOWN;
+	OPPOSITE_ACTIONS[DOWN] = UP;
+	OPPOSITE_ACTIONS[LEFT] = RIGHT;
+	OPPOSITE_ACTIONS[RIGHT] = LEFT;
+	
+	var ALLOW_MOVES_BACK = true;
 
 	var ITERS_PER_CONTINUATION = 400000;
 	var ITER_MAX = 400000;
@@ -36,6 +44,9 @@ var SolverCautious = (function() {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
 		nodeId=0;
+
+		ALLOW_MOVES_BACK = !Solver.RULES.match(/\(\@NO_BACKWARDS_STEPS\)/);
+		
 		if(Solver.MODE == "fast") {
 			FIRST_SOLUTION_ONLY = true;
 			hDiscount = 1.0;
@@ -59,6 +70,7 @@ var SolverCautious = (function() {
 		if(autotickinterval > 0) {
 			ACTIONS.push(WAIT);
 		}
+		ACTIONS.reverse();
 
 		open = initSet();
 		closed = initSet();
@@ -86,19 +98,9 @@ var SolverCautious = (function() {
 						log("Got a win earlier than expected");
 						break;
 					}
-					//log("expanding "+node.id+" due to hint");
-					q.removeItem(node);
-					remove(node,open);
-					insert(node,closed);
-					var newNode;
-					while(newNode = expand(0, node)) {
-						//of the last set of new nodes, find the one whose predecessor-action pair is the previous node and the current action
-						if(hasPredecessor(newNode,node,hint.prefixes[hi][ai])) {
-							node = newNode;
-							//log("picked up thread with new node "+ni+"="+(newNodes[ni] ? newNodes[ni].id : "null"));
-							break;
-						}
-					}
+					node.actions.splice(node.actions.indexOf(hint.prefixes[hi][ai]));
+					node.actions.push(hint.prefixes[hi][ai]);
+					node = expand(0, node);
 				}
 			}
 			if(q.length != 0) {
@@ -396,9 +398,18 @@ var SolverCautious = (function() {
 				//	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
 				existingN.f = existingN.g + existingN.h;
-				if(existingInOpen) {
+				if(existingInOpen && existingN.actions.length > 0) {
 					//let's just live with duplicate items!
 					q.push(existingN);
+					var opposite = OPPOSITE_ACTIONS[action];
+					var oppositeIdx = action in OPPOSITE_ACTIONS ? existingN.actions.indexOf(opposite) : -1;
+					if(oppositeIdx != -1) {
+						existingN.actions.splice(oppositeIdx,1);
+						if(ALLOW_MOVES_BACK) {
+							existingN.actions.unshift(opposite);
+						}
+					}
+					//TODO: Fix this, it's no longer true!
 					//existingN won't have any successors, since it's in the open set.
 					//so there's no need to worry about updating them.
 				} else {
@@ -422,6 +433,14 @@ var SolverCautious = (function() {
 			key:key,
 			f:g+h, g:g, h:h
 		};
+		var opposite = OPPOSITE_ACTIONS[action];
+		var oppositeIdx = action in OPPOSITE_ACTIONS ? n.actions.indexOf(opposite) : -1;
+		if(oppositeIdx != -1) {
+			n.actions.splice(oppositeIdx,1);
+			if(ALLOW_MOVES_BACK) {
+				n.actions.unshift(opposite);
+			}
+		}
 		nodeId++;
 		if(pred) {
 			n.firstPrefix.push(action);

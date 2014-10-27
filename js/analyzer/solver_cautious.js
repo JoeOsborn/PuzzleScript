@@ -16,10 +16,14 @@ var SolverCautious = (function() {
 	OPPOSITE_ACTIONS[LEFT] = RIGHT;
 	OPPOSITE_ACTIONS[RIGHT] = LEFT;
 	
-	var ALLOW_MOVES_BACK = true;
+	var ALLOW_MOVES_BACK;
 
-	var ITERS_PER_CONTINUATION = 400000;
-	var ITER_MAX = 400000;
+	var ITERS_PER_CONTINUATION;
+	var ITER_MAX;
+	
+	var BACK_STEP_PENALTY;
+	var SEEN_SPOT_PENALTY;
+	var VISIT_PENALTY;
 	
 	var ACTIONS;	
 
@@ -39,13 +43,23 @@ var SolverCautious = (function() {
 	var open, closed, q;
 	var root;
 	var MODE = "fast";
+	
+	var seenPlayerPositions = {};
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
 		nodeId=0;
+		seenPlayerPositions = {};
 
-		ALLOW_MOVES_BACK = !Solver.RULES.match(/\(\@NO_BACKWARDS_STEPS\)/);
+		ALLOW_MOVES_BACK = !Utilities.getAnnotationValue(Solver.RULES, "NO_BACKWARDS_STEPS", false);
+		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "20"));
+		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "10"));
+		VISIT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "VISIT_PENALTY", "1.0"));
+		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
+		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
+		ITERS_PER_CONTINUATION = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITERS_PER_CONTINUATION", "200000"));
+		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "200000"));
 		
 		if(Solver.MODE == "fast") {
 			FIRST_SOLUTION_ONLY = true;
@@ -165,10 +179,9 @@ var SolverCautious = (function() {
 		for(var iter=continuation; iter<continuation+ITERS_PER_CONTINUATION && iter<ITER_MAX && q.length > 0; iter++) {
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
-			var node = q.peek();
+			var node = q.shift();
 			//because of weirdness with hints and our inability to delete items from the queue, our q might have noise in it.
 			if(node.actions.length == 0) { 
-				q.shift();
 				continue; 
 			}
 			if(member(node,closed)) { 
@@ -178,7 +191,6 @@ var SolverCautious = (function() {
 			//log("Dat:"+JSON.stringify(node.backup));
 			//just close nodes with best paths longer than or equal to gLimit.
 			if(node.g >= gLimit) { 
-				q.shift();
 				continue;
 			}
 			expand(iter,node);
@@ -186,6 +198,12 @@ var SolverCautious = (function() {
 				//Don't shift here! The first element in the queue might have changed!
 				exactRemove(node,open);
 				exactInsert(node,closed);
+			} else if(!(sentSolution && FIRST_SOLUTION_ONLY)) {
+				for(var ai = 0; ai < node.actionHs.length; ai++) {
+					node.actionHs[ai] *= VISIT_PENALTY;
+				}
+				node.f = node.g + node.actionHs[node.actionHs.length-1];
+				q.push(node);
 			}
 			if(pauseAfterNextSolution && sentSolution) {
 				sentSolution = false;
@@ -225,6 +243,7 @@ var SolverCautious = (function() {
 	var AGAIN_LIMIT = 10;
 	function expand(iter,node) {
 		var action = node.actions.pop();
+		var actionH = node.actionHs.pop();
 		//switch to this state, perform action, createOrFindNode()
 		switchToSearchState(node);
 		processInput(action,false,false,node.backup);
@@ -236,7 +255,7 @@ var SolverCautious = (function() {
 		if(againIters >= AGAIN_LIMIT) {
 			warn("Too many again loops");
 		}
-		var currentNode = createOrFindNode(node,action);
+		var currentNode = createOrFindNode(node,action,actionH);
 		//log("Found "+currentNode.id+" by "+node.id +":"+action);
 		//if this is winning, report a win
 		if(winning) {
@@ -338,12 +357,16 @@ var SolverCautious = (function() {
 		}
 	};
 
-	function hashKey() {
+	function hashKey(ignoreMask) {
 		var h = 0|0;
 		var l = STRIDE_OBJ;
 		var tiles = level.n_tiles;
 		for(i = 0; i < tiles; i++) {
-			var bitmask = level.getCellInto(i,_oA).data;
+			level.getCellInto(i,_oA);
+			if(ignoreMask) {
+				_oA.iclear(ignoreMask);
+			}
+			var bitmask = _oA.data;
 			for(var d = 0; d < l; d++) {
 				h += (bitmask[d]&0x000000FF)|0;
 				h += (h << 10)|0;
@@ -364,10 +387,42 @@ var SolverCautious = (function() {
 		h += ( h << 15 )|0;
 		return h;
 	}
+	
+	function hashPlayerPositions(posns,count) {
+		var h = 0|0;
+		var l = STRIDE_OBJ;
+		var tiles = level.n_tiles;
+		for(i = 0; i < count; i++) {
+			var pos = posns[i];
+			h += (pos&0x000000FF)|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			if(tiles > 255) {
+				h += ((pos>>8)&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+			}
+			if(tiles > 65535) {
+				h += ((pos>>16)&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+			}
+			if(tiles > 16777215) {
+				h += ((pos>>24)&0x000000FF)|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+			}
+		}
+		h += ( h << 3 )|0;
+		h ^= ( h >> 11 )|0;
+		h += ( h << 15 )|0;
+		return h;
+	}
 
 	var tempNode = {
 		id:-1,
 		actions:[],
+		actionHs:[],
 		backup:{},
 		predecessors:[],
 		firstPrefix:[],
@@ -376,8 +431,9 @@ var SolverCautious = (function() {
 		key:0,
 		f:0, g:0, h:0
 	};
-
-	function createOrFindNode(pred, action) {
+	var tempPosns = [];
+	
+	function createOrFindNode(pred, action, actionH) {
 		var key = hashKey();
 		tempNode.winning = winning;
 		tempNode.key = key;
@@ -397,16 +453,17 @@ var SolverCautious = (function() {
 				// if(existingInOpen) {
 				//	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
-				existingN.f = existingN.g + existingN.h;
 				if(existingInOpen && existingN.actions.length > 0) {
 					//let's just live with duplicate items!
-					q.push(existingN);
 					var opposite = OPPOSITE_ACTIONS[action];
 					var oppositeIdx = action in OPPOSITE_ACTIONS ? existingN.actions.indexOf(opposite) : -1;
 					if(oppositeIdx != -1) {
 						existingN.actions.splice(oppositeIdx,1);
+						var ah = existingN.actionHs[oppositeIdx];
+						existingN.actionHs.splice(oppositeIdx,1);
 						if(ALLOW_MOVES_BACK) {
 							existingN.actions.unshift(opposite);
+							existingN.actionHs.unshift(ah * BACK_STEP_PENALTY);
 						}
 					}
 					//TODO: Fix this, it's no longer true!
@@ -416,14 +473,17 @@ var SolverCautious = (function() {
 					//MAYBE: if existingInClosed, also update successors in the closed set?
 					//Won't help with search at all...
 				}
+				existingN.f = existingN.g + existingN.actionHs[existingN.actions.length-1];
+				q.push(existingN);
 			}
 			return existingN;
-		}
+		}		
 		//actually make a node data structure
 		var h = calculateH()*hDiscount;
 		var n = {
 			id:nodeId,
 			actions:ACTIONS.slice(),
+			actionHs:new Array(ACTIONS.length),
 			backup:backupLevel(),
 			predecessors:pred ? [{action:action, predecessor:pred}] : [],
 			firstPrefix:pred ? pred.firstPrefix.slice() : [],
@@ -433,14 +493,66 @@ var SolverCautious = (function() {
 			key:key,
 			f:g+h, g:g, h:h
 		};
+		for(var ai = 0; ai < ACTIONS.length; ai++) {
+			n.actionHs[ai] = h-1;
+		}
 		var opposite = OPPOSITE_ACTIONS[action];
 		var oppositeIdx = action in OPPOSITE_ACTIONS ? n.actions.indexOf(opposite) : -1;
 		if(oppositeIdx != -1) {
 			n.actions.splice(oppositeIdx,1);
+			var ah = n.actionHs[oppositeIdx];
+			n.actionHs.splice(oppositeIdx,1);
 			if(ALLOW_MOVES_BACK) {
 				n.actions.unshift(opposite);
+				n.actionHs.unshift(ah * BACK_STEP_PENALTY);
 			}
 		}
+		var minusPlayerKey = hashKey(state.playerMask);
+		var posnsHash = hashPlayerPositions(playerPositions, playerPositionCount);
+		if(!(minusPlayerKey in seenPlayerPositions)) { seenPlayerPositions[minusPlayerKey] = {}; }
+		if(!(posnsHash in seenPlayerPositions[minusPlayerKey])) { seenPlayerPositions[minusPlayerKey][posnsHash] = 0; }
+		seenPlayerPositions[minusPlayerKey][posnsHash] += 1;
+		for(var ai = 0; ai < ACTIONS.length; ai++) {
+			var a = ACTIONS[ai];
+			if(a < 0 || a >= 4) { continue; }
+			var nidx = n.actions.indexOf(a);
+			if(nidx == -1) { continue; }
+			//let tempPosns[pi] be the probable result of performing a on playerPositions[pi]
+			//TODO: consider stuff on the same layer as the player object at playerPositions[pi]?
+			for(var pi = 0; pi < playerPositionCount; pi++) {
+				var pidx = playerPositions[pi];
+				switch(a) {
+					case UP:
+						tempPosns[pi] = (pidx - 1) < 0 ? pidx : pidx - 1;
+						break;
+					case DOWN:
+						tempPosns[pi] = (pidx + 1) > level.n_tiles ? pidx : pidx + 1;
+						break;
+					case LEFT:
+						tempPosns[pi] = ((pidx - level.height) < 0) ? pidx : (pidx - level.height);
+						break;
+					case RIGHT:
+						tempPosns[pi] = ((pidx + level.height) > level.n_tiles) ? pidx : (pidx + level.height);
+						break;
+				}
+			}
+			var tempHash = hashPlayerPositions(tempPosns, playerPositionCount);
+			if(!(minusPlayerKey in seenPlayerPositions)) {
+				seenPlayerPositions[minusPlayerKey] = {};
+			}
+			//if the hash of ppprime is in seenPlayerPositions, deprioritize it (splice it from and unshift it to n.actions)
+			if(tempHash in seenPlayerPositions[minusPlayerKey]) {
+				n.actions.splice(nidx,1);
+				var ah = n.actionHs[nidx];
+				n.actionHs.splice(nidx,1);
+				n.actions.unshift(a);
+				n.actionHs.unshift(ah * (1 + SEEN_SPOT_PENALTY*seenPlayerPositions[minusPlayerKey][tempHash]));
+				seenPlayerPositions[minusPlayerKey][tempHash]++;
+			} else {
+				seenPlayerPositions[minusPlayerKey][tempHash] = 1;
+			}
+		}
+		n.f = n.g + n.actionHs[n.actions.length-1];
 		nodeId++;
 		if(pred) {
 			n.firstPrefix.push(action);

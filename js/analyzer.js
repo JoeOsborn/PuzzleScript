@@ -17,6 +17,7 @@ var Analyzer = (function() {
 	
 	var USE_WORKERS = false;
 	var RANDOM_RESTART = false;
+	var AUTO_HINT = false;
 	var INPUT_MAPPING = {};
 	INPUT_MAPPING[-1]="WAIT";
 	INPUT_MAPPING[0]="UP";
@@ -477,7 +478,7 @@ var Analyzer = (function() {
 	
 	function levelHint(lev) {
 		var userHints = hintLinesBetween(state.levels[lev].lineNumber+1, nextLevelLine(lev));
-		var solHints = seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev] : {prefixes:[]};
+		var solHints = AUTO_HINT && seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev] : {prefixes:[]};
 		userHints.prefixes = userHints.prefixes.concat(solHints.prefixes);
 		return userHints;
 	}
@@ -742,7 +743,7 @@ var Analyzer = (function() {
 			level:state.levels[level],
 			solved:false,
 			stale:false,
-			prefixes:data.response.kickstart,
+			prefixes:RANDOM_RESTART ? data.response.kickstart : [],
 			steps:[],
 			iteration:data.response.iterations,
 			exhaustive:data.response.fullyExhausted,

@@ -16,14 +16,16 @@ var SolverCautious = (function() {
 	OPPOSITE_ACTIONS[LEFT] = RIGHT;
 	OPPOSITE_ACTIONS[RIGHT] = LEFT;
 	
-	var ALLOW_MOVES_BACK;
+	var BACK_STEPS;
+	//"all": "allow all moves back"
+	//"some": "allow moves back only if the map configuration (ignoring the player) has changed between the predecessor and now."
+	//"none": "allow no moves back"
 
 	var ITERS_PER_CONTINUATION;
 	var ITER_MAX;
 	
 	var BACK_STEP_PENALTY;
 	var SEEN_SPOT_PENALTY;
-	var VISIT_PENALTY;
 	
 	var ACTIONS;	
 
@@ -52,14 +54,13 @@ var SolverCautious = (function() {
 		nodeId=0;
 		seenPlayerPositions = {};
 
-		ALLOW_MOVES_BACK = !Utilities.getAnnotationValue(Solver.RULES, "NO_BACKWARDS_STEPS", false);
-		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "20"));
-		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "10"));
-		VISIT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "VISIT_PENALTY", "1.0"));
+		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", "some").toLowerCase();
+		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "10"));
+		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "0.00001"));
 		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
 		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
-		ITERS_PER_CONTINUATION = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITERS_PER_CONTINUATION", "200000"));
 		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "200000"));
+		ITERS_PER_CONTINUATION = ITER_MAX;
 		
 		if(Solver.MODE == "fast") {
 			FIRST_SOLUTION_ONLY = true;
@@ -199,9 +200,6 @@ var SolverCautious = (function() {
 				exactRemove(node,open);
 				exactInsert(node,closed);
 			} else if(!(sentSolution && FIRST_SOLUTION_ONLY)) {
-				for(var ai = 0; ai < node.actionHs.length; ai++) {
-					node.actionHs[ai] *= VISIT_PENALTY;
-				}
 				node.f = node.g + node.actionHs[node.actionHs.length-1];
 				q.push(node);
 			}
@@ -428,13 +426,15 @@ var SolverCautious = (function() {
 		firstPrefix:[],
 		winning:false,
 		eventualSolutions:[],
-		key:0,
+		key:-1|0,
+		minusPlayerKey:-1|0,
 		f:0, g:0, h:0
 	};
 	var tempPosns = [];
 	
 	function createOrFindNode(pred, action, actionH) {
 		var key = hashKey();
+		var minusPlayerKey = hashKey(state.playerMask);
 		tempNode.winning = winning;
 		tempNode.key = key;
 		var existingInClosed = member(tempNode,closed);
@@ -461,7 +461,7 @@ var SolverCautious = (function() {
 						existingN.actions.splice(oppositeIdx,1);
 						var ah = existingN.actionHs[oppositeIdx];
 						existingN.actionHs.splice(oppositeIdx,1);
-						if(ALLOW_MOVES_BACK) {
+						if(BACK_STEPS == "all" || (BACK_STEPS == "some" && !(pred && pred.minusPlayerKey == minusPlayerKey))) {
 							existingN.actions.unshift(opposite);
 							existingN.actionHs.unshift(ah * BACK_STEP_PENALTY);
 						}
@@ -491,10 +491,11 @@ var SolverCautious = (function() {
 			eventualSolutions:[],
 			//indexing optimization:
 			key:key,
+			minusPlayerKey:minusPlayerKey,
 			f:g+h, g:g, h:h
 		};
 		for(var ai = 0; ai < ACTIONS.length; ai++) {
-			n.actionHs[ai] = h-1;
+			n.actionHs[ai] = h;
 		}
 		var opposite = OPPOSITE_ACTIONS[action];
 		var oppositeIdx = action in OPPOSITE_ACTIONS ? n.actions.indexOf(opposite) : -1;
@@ -502,12 +503,11 @@ var SolverCautious = (function() {
 			n.actions.splice(oppositeIdx,1);
 			var ah = n.actionHs[oppositeIdx];
 			n.actionHs.splice(oppositeIdx,1);
-			if(ALLOW_MOVES_BACK) {
+			if(BACK_STEPS == "all" || (BACK_STEPS == "some" && !(pred && pred.minusPlayerKey == minusPlayerKey))) {
 				n.actions.unshift(opposite);
 				n.actionHs.unshift(ah * BACK_STEP_PENALTY);
 			}
 		}
-		var minusPlayerKey = hashKey(state.playerMask);
 		var posnsHash = hashPlayerPositions(playerPositions, playerPositionCount);
 		if(!(minusPlayerKey in seenPlayerPositions)) { seenPlayerPositions[minusPlayerKey] = {}; }
 		if(!(posnsHash in seenPlayerPositions[minusPlayerKey])) { seenPlayerPositions[minusPlayerKey][posnsHash] = 0; }

@@ -19,12 +19,15 @@ var Analyzer = (function() {
 	var RANDOM_RESTART = false;
 	var AUTO_HINT = false;
 	var INPUT_MAPPING = {};
+	INPUT_MAPPING[-2]="DOTDOTDOT";
 	INPUT_MAPPING[-1]="WAIT";
 	INPUT_MAPPING[0]="UP";
 	INPUT_MAPPING[1]="LEFT";
 	INPUT_MAPPING[2]="DOWN";
 	INPUT_MAPPING[3]="RIGHT";
 	INPUT_MAPPING[4]="ACT";
+	
+	var CODE_DOTDOTDOT = -2;
 
 	var REVERSE_INPUT_MAPPING = {
 		WAIT:-1,
@@ -32,7 +35,8 @@ var Analyzer = (function() {
 		LEFT:1,
 		DOWN:2,
 		RIGHT:3,
-		ACT:4
+		ACT:4,
+		"...":CODE_DOTDOTDOT
 	};
 	
 	var lastRules = "";
@@ -224,6 +228,35 @@ var Analyzer = (function() {
 		}
 		return null;
 	}
+
+	function matchesAnyHint(arrays, hint) {
+		for(var i = 0; i < arrays.length; i++) {
+			var ar = arrays[i];
+			if(hintMatches(ar, hint)) {
+				return ar;
+			}
+		}
+		return null;
+	}
+
+	function hintMatches(steps, hint) {
+		for(var i = 0; i < steps.length && i < hint.length; i++) {
+			var step = steps[i];
+			var hintStep = hint[i];
+			if(hintStep == CODE_DOTDOTDOT) {
+				for(var k = 0; k < steps.length - i; k++) {
+					if(hintMatches(steps.slice(i+k), hint.slice(i+1))) {
+						return true;
+					}
+				}
+				return false;
+			}
+			if(step != hintStep) {
+				return false;
+			}
+		}
+		return true;
+	}
 	
 	function clearRuleCountDisplay() {
 		editor.clearGutter(analyzerRuleCountGutter);
@@ -329,7 +362,7 @@ var Analyzer = (function() {
 					var hints = hintLinesBetween(state.levels[i].lineNumber, nextLevelLine(i));
 					for(var j = 0; j < hints.lines.length; j++) {
 						l = hints.lines[j];
-						var hintClass = anyHasPrefix(seenSolutions[i].prefixes, hints.prefixes[j]) ? hintUsedClass : hintUnusedClass;
+						var hintClass = matchesAnyHint(seenSolutions[i].prefixes, hints.prefixes[j]) ? hintUsedClass : hintUnusedClass;
 						editor.removeLineClass(l, "background", hintUsedClass);
 						editor.removeLineClass(l, "background", hintUnusedClass);
 						editor.addLineClass(l, "background", hintClass);
@@ -419,7 +452,7 @@ var Analyzer = (function() {
 		var lines = [];
 		for(var l = l1; l < l2; l++) {
 			var line = editor.getLine(l).trim();
-			var match = /\(\s*@HINT:\s*((?:UP|DOWN|LEFT|RIGHT|ACTION|WAIT)(?:\s+(UP|DOWN|LEFT|RIGHT|ACTION|WAIT))*)\s*\)/i.exec(line);
+			var match = /\(\s*@HINT:\s*((?:UP|DOWN|LEFT|RIGHT|ACTION|WAIT|\.\.\.)(?:\s+(UP|DOWN|LEFT|RIGHT|ACTION|WAIT|\.\.\.))*)\s*\)/i.exec(line);
 			if(match) {
 				var hint = [];
 				var moves = match[1].split(" ");

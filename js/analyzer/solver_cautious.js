@@ -11,6 +11,7 @@ var SolverCautious = (function() {
 
 	var module = {};
 
+	var DOTDOTDOT = -2;
 	var WAIT = -1;
 	var UP = 0;
 	var LEFT = 1;
@@ -78,14 +79,6 @@ var SolverCautious = (function() {
 			randTable[ri] = Math.random()*256 | 0;
 			randTable2[ri] = Math.random()*256 | 0;
 		}
-
-		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", "some").toLowerCase();
-		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "10"));
-		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "0.00001"));
-		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
-		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
-		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "1000000"));
-		ITERS_PER_CONTINUATION = ITER_MAX;
 		
 		if(Solver.MODE == "fast") {
 			FIRST_SOLUTION_ONLY = true;
@@ -98,6 +91,14 @@ var SolverCautious = (function() {
 			gDiscount = 0.5;
 		}
 		
+		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", "some").toLowerCase();
+		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "10"));
+		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "0.00001"));
+		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
+		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
+		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "1000000"));
+		ITERS_PER_CONTINUATION = ITER_MAX;
+
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
 			return {iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, fullyExhausted:true};
 		}
@@ -133,13 +134,18 @@ var SolverCautious = (function() {
 			for(var hi=0; hi < hint.prefixes.length; hi++) {
 				var node = root;
 				for(var ai=0; ai < hint.prefixes[hi].length; ai++) {
-					if(q.length==0) {
-						log("Got a win earlier than expected");
-						break;
+					var hintI = hint.prefixes[hi][ai];
+					if(hintI == DOTDOTDOT) {
+						//just skip it for now
+					} else {
+						if(q.length==0) {
+							log("Got a win earlier than expected");
+							break;
+						}
+						node.actions.splice(node.actions.indexOf(hint.prefixes[hi][ai]));
+						node.actions.push(hint.prefixes[hi][ai]);
+						node = expand(0, node);
 					}
-					node.actions.splice(node.actions.indexOf(hint.prefixes[hi][ai]));
-					node.actions.push(hint.prefixes[hi][ai]);
-					node = expand(0, node);
 				}
 			}
 			if(q.length != 0) {

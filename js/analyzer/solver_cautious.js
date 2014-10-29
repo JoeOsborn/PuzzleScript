@@ -1,3 +1,11 @@
+var rowCollisionCount=0;
+var colCollisionCount=0;
+var collisionCount=0;
+var findCount=0;
+
+var closedCycles=0;
+var openCycles=0;
+
 var SolverCautious = (function() {
 	var scope = self || this || {};
 
@@ -47,19 +55,36 @@ var SolverCautious = (function() {
 	var MODE = "fast";
 	
 	var seenPlayerPositions = {};
+	
+	var randTable = new Int8Array(256);
+	var randTable2 = new Int8Array(256);
+	
+	var MAP_SIZE=0|0; // in bytes
+	var NODE_LIMIT=Infinity;
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
 		nodeId=0;
 		seenPlayerPositions = {};
+		
+		MAP_SIZE = level.n_tiles * STRIDE_OBJ * 4; // each STRIDE is 32 bits
+		var memLimit = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "MEMORY_LIMIT", Infinity)); // in MB
+		if(Math.floor(memLimit) != Infinity) {
+			NODE_LIMIT = Math.floor((memLimit*1024*1024) / MAP_SIZE);
+		}
+		
+		for(var ri = 0; ri < randTable.length; ri++) {
+			randTable[ri] = Math.random()*256 | 0;
+			randTable2[ri] = Math.random()*256 | 0;
+		}
 
 		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", "some").toLowerCase();
 		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "10"));
 		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "0.00001"));
 		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
 		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
-		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "200000"));
+		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "1000000"));
 		ITERS_PER_CONTINUATION = ITER_MAX;
 		
 		if(Solver.MODE == "fast") {
@@ -74,10 +99,9 @@ var SolverCautious = (function() {
 		}
 		
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
-			log("nope");
 			return {iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, fullyExhausted:true};
 		}
-
+		
 		ACTIONS = [UP, DOWN, LEFT, RIGHT];
 		if(!('noaction' in state.metadata)) {
 			ACTIONS.push(ACTION);
@@ -178,6 +202,9 @@ var SolverCautious = (function() {
 		//up to X iterations:
 		sentSolution = false;
 		for(var iter=continuation; iter<continuation+ITERS_PER_CONTINUATION && iter<ITER_MAX && q.length > 0; iter++) {
+			if(iter % 20000 == 0) {
+				log("Lev:"+Solver.LEVEL+" Iter:"+iter);
+			}
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
 			var node = q.shift();
@@ -229,7 +256,7 @@ var SolverCautious = (function() {
 				response:{
 					iterations:iter,
 					queueLength:q.length,
-					kickstart:q.length > 0 ? samplePathsFromQueue(100) : [],
+					kickstart:Analyzer.RANDOM_RESTART && q.length > 0 ? samplePathsFromQueue(100) : [],
 					nodeCount:nodeId,
 					minG:(q.peek() ? q.peek().g : -1),
 					minH:(q.peek() ? q.peek().h : -1),
@@ -366,16 +393,16 @@ var SolverCautious = (function() {
 			}
 			var bitmask = _oA.data;
 			for(var d = 0; d < l; d++) {
-				h += (bitmask[d]&0x000000FF)|0;
+				h += (randTable[bitmask[d]&0x000000FF])|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
-				h += ((bitmask[d]>>8)&0x000000FF)|0;
+				h += (randTable[(bitmask[d]>>8)&0x000000FF])|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
-				h += ((bitmask[d]>>16)&0x000000FF)|0;
+				h += (randTable[(bitmask[d]>>16)&0x000000FF])|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
-				h += ((bitmask[d]>>24)&0x000000FF)|0;
+				h += (randTable[(bitmask[d]>>24)&0x000000FF])|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
 			}
@@ -386,27 +413,52 @@ var SolverCautious = (function() {
 		return h;
 	}
 	
+	function hashKey2(ignoreMask) {
+		var h = 2166136261|0;
+		var l = STRIDE_OBJ|0;
+		var FNV_prime = 16777619|0;
+		var tiles = level.n_tiles;
+		for(i = 0; i < tiles; i++) {
+			level.getCellInto(i,_oA);
+			if(ignoreMask) {
+				_oA.iclear(ignoreMask);
+			}
+			var bitmask = _oA.data;
+			for(var d = 0; d < l; d++) {
+				h ^= (randTable2[bitmask[d]&0x000000FF])|0;
+				h *= FNV_prime;
+				h ^= (randTable2[(bitmask[d]>>8)&0x000000FF])|0;
+				h *= FNV_prime;
+				h ^= (randTable2[(bitmask[d]>>16)&0x000000FF])|0;
+				h *= FNV_prime;
+				h ^= (randTable2[(bitmask[d]>>24)&0x000000FF])|0;
+				h *= FNV_prime;
+			}
+		}
+		return h;		
+	}
+	
 	function hashPlayerPositions(posns,count) {
 		var h = 0|0;
 		var l = STRIDE_OBJ;
 		var tiles = level.n_tiles;
 		for(i = 0; i < count; i++) {
 			var pos = posns[i];
-			h += (pos&0x000000FF)|0;
+			h += randTable[(pos&0x000000FF)]|0;
 			h += (h << 10)|0;
 			h ^= (h >> 6)|0;
 			if(tiles > 255) {
-				h += ((pos>>8)&0x000000FF)|0;
+				h += randTable[((pos>>8)&0x000000FF)]|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
 			}
 			if(tiles > 65535) {
-				h += ((pos>>16)&0x000000FF)|0;
+				h += randTable[((pos>>16)&0x000000FF)]|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
 			}
 			if(tiles > 16777215) {
-				h += ((pos>>24)&0x000000FF)|0;
+				h += randTable[((pos>>24)&0x000000FF)]|0;
 				h += (h << 10)|0;
 				h ^= (h >> 6)|0;
 			}
@@ -437,8 +489,14 @@ var SolverCautious = (function() {
 		var minusPlayerKey = hashKey(state.playerMask);
 		tempNode.winning = winning;
 		tempNode.key = key;
-		var existingInClosed = member(tempNode,closed);
-		var existingInOpen = existingInClosed ? null : member(tempNode,open);
+		var existingInOpen = member(tempNode,open);
+		if(existingInOpen) {
+			openCycles++;
+		}
+		var existingInClosed = existingInOpen ? null : member(tempNode,closed);
+		if(existingInClosed && !existingInOpen) {
+			closedCycles++;
+		}
 		var existingN = existingInClosed || existingInOpen;
 		var g = pred ? pred.g+gDiscount : 0;
 		if(existingN) {
@@ -494,6 +552,7 @@ var SolverCautious = (function() {
 			minusPlayerKey:minusPlayerKey,
 			f:g+h, g:g, h:h
 		};
+		
 		for(var ai = 0; ai < ACTIONS.length; ai++) {
 			n.actionHs[ai] = h;
 		}
@@ -723,6 +782,7 @@ var SolverCautious = (function() {
 		if(n1 == n2) { return true; }
 		if(n1.key != n2.key) { return false; }
 		if(n1.winning != n2.winning) { return false; }
+		
 		var n1BakObjs = null;
 		if(n1.backup && n1.backup.dat) {
 			n1BakObjs = n1.backup.dat;
@@ -731,9 +791,14 @@ var SolverCautious = (function() {
 		}
 		var n2BakObjs = n2.backup.dat;
 		if(n1BakObjs.length != n2BakObjs.length) { return false; }
+		
 		for(var i=0; i < n1BakObjs.length; i++) {
-			if(n1BakObjs[i] != n2BakObjs[i]) { return false; }
+			if(n1BakObjs[i] != n2BakObjs[i]) { 
+				collisionCount++;
+				return false; 
+			}
 		}
+		findCount++;
 		return true;
 	}
 

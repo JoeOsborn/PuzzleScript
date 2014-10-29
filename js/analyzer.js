@@ -516,9 +516,8 @@ var Analyzer = (function() {
 					//console.log("MSG:"+type+":"+JSON.stringify(msg));
 					switch(type) {
 						case "busy":
-							setTimeout(function() {
-								Solver.continueSearch(msg.continuation);
-							}, 10);
+							console.log("Busy:"+msg.response.continuation);
+							Solver.continueSearch(msg.response.continuation);
 							break;
 						case "stopped":
 							tickLevelQueue(null);
@@ -600,96 +599,7 @@ var Analyzer = (function() {
 						consolePrint("<span class='line-level-unsolvable'>Level "+data.level+" is not solvable!</span>");
 					}
 				}
-				if(seenSolutions[data.level].solved) {
-					var bounds = solutionBounds(data.level);
-					var short = shortest(seenSolutions[data.level].steps);
-					if(short.length < bounds.low) {
-						consolePrint(
-							"<span class='line-solution-too-short'>Level "+data.level+": Shortest solution<br/>"+
-							"&nbsp;"+short.join(" ")+"<br/>"+
-							"&nbsp;is shorter than designer-supplied minimum length "+bounds.low+
-							"</span>"
-						);
-					}
-					if(short.length > bounds.high) {
-						consolePrint(
-							"<span class='line-solution-too-long'>Level "+data.level+": Shortest solution<br/>"+
-							"&nbsp;"+short.join(" ")+"<br/>"+
-							"&nbsp;is longer than designer-supplied maximum length "+bounds.high+
-							"</span>"
-						);
-					}
-				}
-				if(lastSeenSolutions[data.level]) {
-					var oldSolutions = lastSeenSolutions[data.level].prefixes;
-					var newSolutions = seenSolutions[data.level].prefixes;
-					if(lastSeenSolutions[data.level].solved && seenSolutions[data.level].solved) {
-						var absentOldSolutions = oldSolutions.filter(function(sol) {
-							return !memberArray(newSolutions, sol);
-						});
-						var brandNewSolutions = newSolutions.filter(function(sol) {
-							return !memberArray(oldSolutions, sol);
-						});
-						//Print console info for solutions which have changed or disappeared.
-						for(var i = 0; i < absentOldSolutions.length; i++) {
-							var oldSoln = absentOldSolutions[i];
-							var newSoln;
-							if((newSoln = anyHasPrefix(newSolutions, oldSoln))) {
-								consolePrint(
-									'<span class="line-solution-got-longer">Level '+data.level+': Solution got longer in new version:<br/>'+
-									'&nbsp;'+prefixToSolutionSteps(oldSoln).join(" ")+'<br/>'+
-									'&nbsp;--&gt;<br/>'+
-									'&nbsp;'+prefixToSolutionSteps(newSoln).join(" ")+
-									'</span>'
-								);
-								brandNewSolutions.splice(brandNewSolutions.indexOf(newSoln),1);
-							} else if((newSoln = hasAnyPrefix(oldSoln, newSolutions))) {
-								consolePrint(
-									'<span class="line-solution-got-shorter">Level '+data.level+': Solution got shorter in new version:<br/>'+
-									'&nbsp;'+prefixToSolutionSteps(oldSoln).join(" ")+'<br/>'+
-									'&nbsp;--&gt;<br/>'+
-									'&nbsp;'+prefixToSolutionSteps(newSoln).join(" ")+
-									'</span>'
-								);
-								brandNewSolutions.splice(brandNewSolutions.indexOf(newSoln),1);
-							} else {
-								consolePrint(
-									'<span class="line-solution-disappeared">Level '+data.level+': Solution no longer used in new version:<br/>'+
-									'&nbsp;'+prefixToSolutionSteps(oldSoln).join(" ")+'<br/>'+
-									'&nbsp;--&gt;<br/>'+
-									'&nbsp;XXXX'+
-									'</span>'
-								);
-							}
-						}
-						//for each soln of newSolutions which do not share prefix
-						//with anything in oldSolutions... (those have been removed)
-						for(i = 0; i < brandNewSolutions.length; i++) {
-							var newSoln = brandNewSolutions[i];
-							consolePrint(
-								'<span class="line-solution-appeared">Level '+data.level+': New solution appeared in new version:<br/>'+
-								'&nbsp;XXXX'+
-								'&nbsp;--&gt;<br/>'+
-								'&nbsp;'+prefixToSolutionSteps(newSoln).join(" ")+'<br/>'+
-								'</span>'
-							);
-						}
-		
-					} else if(lastSeenSolutions[data.level].solved) {
-						//level used to be solvable but now is not
-						consolePrint(
-							'<span class="line-level-unsolvable">Level '+data.level+' used to be solvable by:<br/>'+
-							'&nbsp;'+oldSolutions.map(prefixToSolutionSteps).join("<br/>&nbsp;")+'<br/>'+
-							'</span>'
-						);
-					} else if(seenSolutions[data.level].solved) {
-						consolePrint(
-							'<span class="line-level-solvable">Level '+data.level+' is now solvable by:<br/>'+
-							'&nbsp;'+newSolutions.map(prefixToSolutionSteps).join("<br/>&nbsp;")+'<br/>'+
-							'</span>'
-						);
-					}
-				}
+				analyzeSolutions(data.level);
 				consoleCacheDump();
 				break;
 			case "hintInsufficient":
@@ -699,6 +609,99 @@ var Analyzer = (function() {
 				break;
 			default:
 				break;
+		}
+	}
+	
+	function analyzeSolutions(level) {
+		if(seenSolutions[level].solved) {
+			var bounds = solutionBounds(level);
+			var short = shortest(seenSolutions[level].steps);
+			if(short.length < bounds.low) {
+				consolePrint(
+					"<span class='line-solution-too-short'>Level "+level+": Shortest solution<br/>"+
+					"&nbsp;"+short.join(" ")+"<br/>"+
+					"&nbsp;is shorter than designer-supplied minimum length "+bounds.low+
+					"</span>"
+				);
+			}
+			if(short.length > bounds.high) {
+				consolePrint(
+					"<span class='line-solution-too-long'>Level "+level+": Shortest solution<br/>"+
+					"&nbsp;"+short.join(" ")+"<br/>"+
+					"&nbsp;is longer than designer-supplied maximum length "+bounds.high+
+					"</span>"
+				);
+			}
+		}
+		if(lastSeenSolutions[level]) {
+			var oldSolutions = lastSeenSolutions[level].prefixes;
+			var newSolutions = seenSolutions[level].prefixes;
+			if(lastSeenSolutions[level].solved && seenSolutions[level].solved) {
+				var absentOldSolutions = oldSolutions.filter(function(sol) {
+					return !memberArray(newSolutions, sol);
+				});
+				var brandNewSolutions = newSolutions.filter(function(sol) {
+					return !memberArray(oldSolutions, sol);
+				});
+				//Print console info for solutions which have changed or disappeared.
+				for(var i = 0; i < absentOldSolutions.length; i++) {
+					var oldSoln = absentOldSolutions[i];
+					var newSoln;
+					if((newSoln = anyHasPrefix(newSolutions, oldSoln))) {
+						consolePrint(
+							'<span class="line-solution-got-longer">Level '+level+': Solution got longer in new version:<br/>'+
+							'&nbsp;'+prefixToSolutionSteps(oldSoln).join(" ")+'<br/>'+
+							'&nbsp;--&gt;<br/>'+
+							'&nbsp;'+prefixToSolutionSteps(newSoln).join(" ")+
+							'</span>'
+						);
+						brandNewSolutions.splice(brandNewSolutions.indexOf(newSoln),1);
+					} else if((newSoln = hasAnyPrefix(oldSoln, newSolutions))) {
+						consolePrint(
+							'<span class="line-solution-got-shorter">Level '+level+': Solution got shorter in new version:<br/>'+
+							'&nbsp;'+prefixToSolutionSteps(oldSoln).join(" ")+'<br/>'+
+							'&nbsp;--&gt;<br/>'+
+							'&nbsp;'+prefixToSolutionSteps(newSoln).join(" ")+
+							'</span>'
+						);
+						brandNewSolutions.splice(brandNewSolutions.indexOf(newSoln),1);
+					} else {
+						consolePrint(
+							'<span class="line-solution-disappeared">Level '+level+': Solution no longer used in new version:<br/>'+
+							'&nbsp;'+prefixToSolutionSteps(oldSoln).join(" ")+'<br/>'+
+							'&nbsp;--&gt;<br/>'+
+							'&nbsp;XXXX'+
+							'</span>'
+						);
+					}
+				}
+				//for each soln of newSolutions which do not share prefix
+				//with anything in oldSolutions... (those have been removed)
+				for(i = 0; i < brandNewSolutions.length; i++) {
+					var newSoln = brandNewSolutions[i];
+					consolePrint(
+						'<span class="line-solution-appeared">Level '+level+': New solution appeared in new version:<br/>'+
+						'&nbsp;XXXX'+
+						'&nbsp;--&gt;<br/>'+
+						'&nbsp;'+prefixToSolutionSteps(newSoln).join(" ")+'<br/>'+
+						'</span>'
+					);
+				}
+
+			} else if(lastSeenSolutions[level].solved) {
+				//level used to be solvable but now is not
+				consolePrint(
+					'<span class="line-level-unsolvable">Level '+level+' used to be solvable by:<br/>'+
+					'&nbsp;'+oldSolutions.map(prefixToSolutionSteps).join("<br/>&nbsp;")+'<br/>'+
+					'</span>'
+				);
+			} else if(seenSolutions[level].solved) {
+				consolePrint(
+					'<span class="line-level-solvable">Level '+level+' is now solvable by:<br/>'+
+					'&nbsp;'+newSolutions.map(prefixToSolutionSteps).join("<br/>&nbsp;")+'<br/>'+
+					'</span>'
+				);
+			}
 		}
 	}
 

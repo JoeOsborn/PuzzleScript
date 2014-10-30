@@ -19,7 +19,8 @@ var Analyzer = (function() {
 	var RANDOM_RESTART = false;
 	var AUTO_HINT = false;
 	var INPUT_MAPPING = {};
-	INPUT_MAPPING[-2]="DOTDOTDOT";
+	INPUT_MAPPING[-3]="ANY";
+	INPUT_MAPPING[-2]="...";
 	INPUT_MAPPING[-1]="WAIT";
 	INPUT_MAPPING[0]="UP";
 	INPUT_MAPPING[1]="LEFT";
@@ -27,16 +28,18 @@ var Analyzer = (function() {
 	INPUT_MAPPING[3]="RIGHT";
 	INPUT_MAPPING[4]="ACT";
 	
+	var CODE_ANY_MOVE = -3;
 	var CODE_DOTDOTDOT = -2;
 
 	var REVERSE_INPUT_MAPPING = {
+		ANY:CODE_ANY_MOVE,
+		"...":CODE_DOTDOTDOT,
 		WAIT:-1,
 		UP:0,
 		LEFT:1,
 		DOWN:2,
 		RIGHT:3,
-		ACT:4,
-		"...":CODE_DOTDOTDOT
+		ACT:4
 	};
 	
 	var lastRules = "";
@@ -229,33 +232,104 @@ var Analyzer = (function() {
 		return null;
 	}
 
-	function matchesAnyHint(arrays, hint) {
+	function allMatchingHint(lev, arrays, hint) {
+		var matched = [];
 		for(var i = 0; i < arrays.length; i++) {
 			var ar = arrays[i];
-			if(hintMatches(ar, hint)) {
-				return ar;
+			if(hintMatches(lev, ar, hint)) {
+				matched.push(ar);
 			}
 		}
-		return null;
+		return matched;
 	}
 
-	function hintMatches(steps, hint) {
+	var _ao1, zero;
+	function hintMatches(lev, steps, hint) {
+		//FIXME: scrumbles up the world state.
+		var oldLevel = curlevel;
+		var oldState = backupLevel();
+		if(lev != curlevel) {
+			compile(["loadLevel",lev]);
+		}
+		_ao1 = new BitVec(STRIDE_OBJ);
+		zero = new BitVec(STRIDE_OBJ);
+		zero.setZero();
+		var result = hintMatches_(steps, hint);
+		if(lev != oldLevel) {
+			compile(["loadLevel",oldLevel]);
+		}
+		restoreLevel(oldState);
+		return result;
+	}
+	
+	var AGAIN_LIMIT = 100;
+	
+	function hintMatches_(steps, hint) {
 		for(var i = 0; i < steps.length && i < hint.length; i++) {
 			var step = steps[i];
 			var hintStep = hint[i];
-			if(hintStep == CODE_DOTDOTDOT) {
+			if(hintStep.move == CODE_DOTDOTDOT) {
+				if(i == hint.length - 1) { return true; }
 				for(var k = 0; k < steps.length - i; k++) {
-					if(hintMatches(steps.slice(i+k), hint.slice(i+1))) {
+					if(hintMatches_(steps.slice(i+k), hint.slice(i+1))) {
 						return true;
 					}
 				}
 				return false;
-			}
-			if(step != hintStep) {
+			} else if(hintStep.move == CODE_ANY_MOVE) {
+				
+			} else if(step != hintStep.move) {
 				return false;
 			}
+			var again = 0;
+			processInput(step);
+			while(againing && again <= AGAIN_LIMIT) {
+				processInput(-1);
+				again++;
+			}
+			if(again >= AGAIN_LIMIT) {
+				error("Too many again loops!");
+			}
+			if(!stateMatches(hintStep.state)) {
+				return false;
+			}
+			if(winning && i == steps.length - 1 && i == hint.length - 1) {
+				return true;
+			}
 		}
-		return true;
+		//Ran out of hint.
+		return false;
+	}
+	
+	function stateMatches(state) {
+		if(state == null) { return true; }
+		for(var x = 0; x <= level.width - state.width; x++) {
+			for(var y = 0; y <= level.height - state.height; y++) {
+				if(stateMatchesAt(state, x, y)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	
+	function stateMatchesAt(state, x, y) {
+		for(var stateX = 0; stateX < state.width; stateX++) {
+			for(var stateY = 0; stateY < state.height; stateY++) {
+				var stateI = stateX*state.width+stateY;
+				var levX = x + stateX;
+				var levY = y + stateY;
+				var levI = levX*level.width+levY;
+				var stateInMask = state.inPattern[stateI*STRIDE_OBJ];
+				var levMask = level.getCellInto(levI, _ao1);
+				if(!stateIn.iand(levMask).equals(levMask)) {
+					return false;
+				}
+				if(!stateOut.iand(levMask).equals(zero)) {
+					return false;
+				}
+			}
+		}
 	}
 	
 	function clearRuleCountDisplay() {
@@ -359,14 +433,16 @@ var Analyzer = (function() {
 				//if a hint is prefix to the solution, highlight it green
 				//otherwise, highlight it red
 				if(seenSolutions[i].solved) {
-					var hints = hintLinesBetween(state.levels[i].lineNumber, nextLevelLine(i));
-					for(var j = 0; j < hints.lines.length; j++) {
-						l = hints.lines[j];
-						var hintClass = matchesAnyHint(seenSolutions[i].prefixes, hints.prefixes[j]) ? hintUsedClass : hintUnusedClass;
-						editor.removeLineClass(l, "background", hintUsedClass);
-						editor.removeLineClass(l, "background", hintUnusedClass);
-						editor.addLineClass(l, "background", hintClass);
-						lineHighlights[l] = hintClass;
+					var hints = hintsBetween(state.levels[i].lineNumber, nextLevelLine(i));
+					for(var j = 0; j < seenSolutions[i].matchedHints.length; j++) {
+						l = hints.ranges[j];
+						var hintClass = seenSolutions[i].matchedHints[j] ? hintUsedClass : hintUnusedClass;
+						for(var li = l[0].line; li <= l[1].line; li++) {
+							editor.removeLineClass(li, "background", hintUsedClass);
+							editor.removeLineClass(li, "background", hintUnusedClass);
+							editor.addLineClass(li, "background", hintClass);
+							lineHighlights[li] = hintClass;
+						}
 					}
 					var bounds = solutionBounds(i);
 					var short = shortest(seenSolutions[i].steps);
@@ -447,26 +523,63 @@ var Analyzer = (function() {
 		return q;
 	}
 	
-	function hintLinesBetween(l1, l2) {
-		var hints = [];
-		var lines = [];
-		for(var l = l1; l < l2; l++) {
-			var line = editor.getLine(l).trim();
-			var match = /\(\s*@HINT:\s*((?:UP|DOWN|LEFT|RIGHT|ACTION|WAIT|\.\.\.)(?:\s+(UP|DOWN|LEFT|RIGHT|ACTION|WAIT|\.\.\.))*)\s*\)/i.exec(line);
-			if(match) {
-				var hint = [];
-				var moves = match[1].split(" ");
-				for(var i=0; i < moves.length; i++) {
-					if(moves[i].trim() != "") {
-						hint.push(REVERSE_INPUT_MAPPING[moves[i].toUpperCase()]);
-					}
-				}
-				hints.push(hint);
-				lines.push(l);
+	var dirRE = /^(UP|DOWN|LEFT|RIGHT|ACT|WAIT|ANY|\.\.\.)(?:\s|\)|\&)/i;
+	function consumeHintElement(str) {
+		var idx = 0;
+		var hint = null;
+		//repeatedly: parse a direction, then whitespace; or a \).
+		while(idx < str.length) {
+			if(str[idx] == ")") {
+				idx++;
+				break;
 			}
+			var match = str.match(dirRE);
+			if(match) {
+				idx += match[0].length-1;
+				var thisMove = match[1];
+				hint = {move:REVERSE_INPUT_MAPPING[thisMove.toUpperCase()]};
+				break;
+			} else if(false) {
+				//TODO: also parse a 2D pattern or a conjunction or a negation of a direction/pattern
+				break;
+			} else {
+				idx++;
+			}
+			str = str.substring(idx);
+			idx = 0;
 		}
-		//console.log("Using hints "+hints.map(prefixToSolutionSteps).join("<br/>&nbsp;&nbsp;"));
-		return {prefixes:hints, lines:lines};
+		str = str.substring(idx);
+		return {remainder:str, hint:hint};
+	}
+	
+	var hintStartRE = /\(\s*@HINT:/i;
+	function hintsBetween(l1, l2) {
+		var hints = [];
+		var ranges = [];
+		//find a (@HINT starting at or after l1 but before l2
+		//find the ) after that @HINT
+		//then parse it
+		var str = editor.getRange({line:l1},{line:l2});
+		var hintStartMatch;
+		var idx = editor.indexFromPos({line:l1});
+		while(hintStartMatch = str.match(hintStartRE)) {
+			idx += hintStartMatch.index+hintStartMatch[0].length;
+			var range = [editor.posFromIndex(idx)];
+			var hint = [];
+			str = str.substring(hintStartMatch.index+hintStartMatch[0].length).trim();
+			do {
+				var result = consumeHintElement(str);
+				idx += str.length-result.remainder.length;
+				str = result.remainder;
+				if(result.hint) {
+					hint.push(result.hint);
+				}
+			} while(result.hint);
+			hints.push(hint);
+			range.push(editor.posFromIndex(idx));
+			ranges.push(range);
+		}
+		return {hints:hints, ranges:ranges};
 	}
 
 	function annotationsBetween(l1, l2) {
@@ -510,10 +623,14 @@ var Analyzer = (function() {
 	}
 	
 	function levelHint(lev) {
-		var userHints = hintLinesBetween(state.levels[lev].lineNumber+1, nextLevelLine(lev));
-		var solHints = AUTO_HINT && seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev] : {prefixes:[]};
-		userHints.prefixes = userHints.prefixes.concat(solHints.prefixes);
-		return userHints;
+		var userHints = hintsBetween(state.levels[lev].lineNumber+1, nextLevelLine(lev));
+		var solPrefixes = AUTO_HINT && seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev].prefixes : [];
+		userHints.hints = userHints.hints.concat(solPrefixes.map(function(pref) {
+			return pref.map(function(move) {
+				return {move:move}
+			});
+		}));
+		return userHints.hints;
 	}
 	
 	function tickLevelQueue(wkr) {
@@ -754,6 +871,7 @@ var Analyzer = (function() {
 				solved:true,
 				stale:false,
 				prefixes:soln.prefixes,
+				matchedHints:[],
 				steps:soln.prefixes.map(prefixToSolutionSteps),
 				iteration:data.iteration,
 				exhaustive:data.queueLength == 0,
@@ -764,6 +882,25 @@ var Analyzer = (function() {
 			seenSolutions[level].steps = seenSolutions[level].steps.concat(soln.prefixes.map(prefixToSolutionSteps));
 			seenSolutions[level].exhaustive = data.queueLength == 0;
 		}
+		
+		var hints = hintsBetween(state.levels[level].lineNumber, nextLevelLine(Level));
+		for(var j = 0; j < hints.ranges.length; j++) {
+			var matchedPrefixes = allMatchingHint(
+				//FIXME: seed issues?
+				level,
+				soln.prefixes,
+				hints.hints[j]
+			);
+			seenSolutions[level].matchedHints[j] = (matchedPrefixes.length == soln.prefixes.length) && 
+			  (!(j in seenSolutions[level].matchedHints) || 
+			   seenSolutions[level].matchedHints[j]
+			  );
+			if(matchedPrefixes.length != soln.prefixes.length) {
+				//TODO: warn about unmatched solns for this hint
+				warn("Unmatched solutions and hint-valid solutions:\n"+soln.prefixes.map(prefixToSolutionSteps).join("\n")+"\n  VS  \n"+matchedPrefixes.map(prefixToSolutionSteps).join("\n"));
+			}
+		}
+
 		storedRuleCounts[data.level][RC_CATEGORY_WIN] = soln.ruleCounts[0];
 		updateLevelHighlights();
 		updateRuleCountDisplay();
@@ -780,6 +917,7 @@ var Analyzer = (function() {
 			solved:false,
 			stale:false,
 			prefixes:RANDOM_RESTART ? data.response.kickstart : [],
+			matchedHints:[],
 			steps:[],
 			iteration:data.response.iterations,
 			exhaustive:data.response.fullyExhausted,

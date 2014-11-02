@@ -48,8 +48,9 @@ var Solver = (function() {
 		if(start.fullyExhausted) {
 			Solver.REPLY_FN("exhausted", {level:module.LEVEL, time:module.timeSinceStart(), response:start});
 			Solver.REPLY_FN("stopped");
+			return null;
 		} else {
-			Solver.continueSearch(start.continuation);
+			return Solver.continueSearch(start.continuation);
 		}
 	};
 	
@@ -73,6 +74,7 @@ var Solver = (function() {
 		}
 		testsAutoAdvanceLevel = OLD_AUTO_ADVANCE;
 		unitTesting = OLD_TESTING;
+		return response.response;
 	};
 
 	var storedRuleCounts;

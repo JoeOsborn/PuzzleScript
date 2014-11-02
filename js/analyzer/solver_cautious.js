@@ -62,10 +62,14 @@ var SolverCautious = (function() {
 	
 	var MAP_SIZE=0|0; // in bytes
 	var NODE_LIMIT=Infinity;
+	
+	var notPlayerMask;
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
+		notPlayerMask = state.playerMask.clone();
+		notPlayerMask.iflip();
 		nodeId=0;
 		seenPlayerPositions = {};
 		
@@ -96,7 +100,7 @@ var SolverCautious = (function() {
 		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "0.00001"));
 		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
 		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
-		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "1000000"));
+		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "100000"));
 		ITERS_PER_CONTINUATION = ITER_MAX;
 
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
@@ -262,7 +266,7 @@ var SolverCautious = (function() {
 				response:{
 					iterations:iter,
 					queueLength:q.length,
-					kickstart:Analyzer.RANDOM_RESTART && q.length > 0 ? samplePathsFromQueue(100) : [],
+					kickstart:Solver.RANDOM_RESTART && q.length > 0 ? samplePathsFromQueue(100) : [],
 					nodeCount:nodeId,
 					minG:(q.peek() ? q.peek().g : -1),
 					minH:(q.peek() ? q.peek().h : -1),
@@ -271,17 +275,25 @@ var SolverCautious = (function() {
 			};
 		}
 	}
-	var AGAIN_LIMIT = 10;
+	var AGAIN_LIMIT = 100;
 	function expand(iter,node) {
 		var action = node.actions.pop();
 		var actionH = node.actionHs.pop();
 		//switch to this state, perform action, createOrFindNode()
 		switchToSearchState(node);
-		processInput(action,false,false,node.backup);
+		if(!processInput(action,false,false,node.backup,true) || cmd_cancel || cmd_restart) {
+			return node;
+		}
+		if(cmd_checkpoint) {
+			//TODO: bump this node's H value?
+		}
 		var againIters = 0;
 		while(againing && againIters < AGAIN_LIMIT) {
 			processInput(-1);
 			againIters++;
+			if(cmd_checkpoint) {
+				//TODO: bump this node's H value?
+			}
 		}
 		if(againIters >= AGAIN_LIMIT) {
 			warn("Too many again loops");
@@ -388,16 +400,43 @@ var SolverCautious = (function() {
 		}
 	};
 
-	function hashKey(ignoreMask) {
+	var rearranged = [];
+	var rearrangedCount = 0;
+	function hashKey(rearrangeMask) {
 		var h = 0|0;
 		var l = STRIDE_OBJ;
 		var tiles = level.n_tiles;
-		for(i = 0; i < tiles; i++) {
+		rearrangedCount = 0;
+		for(var i = 0; i < tiles; i++) {
 			level.getCellInto(i,_oA);
-			if(ignoreMask) {
-				_oA.iclear(ignoreMask);
+			if(rearrangeMask) {
+				if(!rearranged[rearrangedCount]) {
+					rearranged[rearrangedCount] = _oA.clone();
+				} else {
+					_oA.cloneInto(rearranged[rearrangedCount]);
+				}
+				rearranged[rearrangedCount].iand(rearrangeMask);
+				rearrangedCount++;
+				_oA.iclear(rearrangeMask);
 			}
 			var bitmask = _oA.data;
+			for(var d = 0; d < l; d++) {
+				h += (randTable[bitmask[d]&0x000000FF])|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+				h += (randTable[(bitmask[d]>>8)&0x000000FF])|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+				h += (randTable[(bitmask[d]>>16)&0x000000FF])|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+				h += (randTable[(bitmask[d]>>24)&0x000000FF])|0;
+				h += (h << 10)|0;
+				h ^= (h >> 6)|0;
+			}
+		}
+		for(i = 0; i < rearrangedCount; i++) {
+			var bitmask = rearranged[i].data;
 			for(var d = 0; d < l; d++) {
 				h += (randTable[bitmask[d]&0x000000FF])|0;
 				h += (h << 10)|0;
@@ -419,17 +458,38 @@ var SolverCautious = (function() {
 		return h;
 	}
 	
-	function hashKey2(ignoreMask) {
+	function hashKey2(rearrangeMask) {
 		var h = 2166136261|0;
 		var l = STRIDE_OBJ|0;
 		var FNV_prime = 16777619|0;
 		var tiles = level.n_tiles;
-		for(i = 0; i < tiles; i++) {
+		rearrangedCount = 0;
+		for(var i = 0; i < tiles; i++) {
 			level.getCellInto(i,_oA);
-			if(ignoreMask) {
-				_oA.iclear(ignoreMask);
+			if(rearrangeMask) {
+				if(!rearranged[rearrangedCount]) {
+					rearranged[rearrangedCount] = _oA.clone();
+				} else {
+					_oA.cloneInto(rearranged[rearrangedCount]);
+				}
+				rearranged[rearrangedCount].iand(rearrangeMask);
+				rearrangedCount++;
+				_oA.iclear(rearrangeMask);
 			}
 			var bitmask = _oA.data;
+			for(var d = 0; d < l; d++) {
+				h ^= (randTable2[bitmask[d]&0x000000FF])|0;
+				h *= FNV_prime;
+				h ^= (randTable2[(bitmask[d]>>8)&0x000000FF])|0;
+				h *= FNV_prime;
+				h ^= (randTable2[(bitmask[d]>>16)&0x000000FF])|0;
+				h *= FNV_prime;
+				h ^= (randTable2[(bitmask[d]>>24)&0x000000FF])|0;
+				h *= FNV_prime;
+			}
+		}
+		for(i = 0; i < rearrangedCount; i++) {
+			var bitmask = rearranged[i].data;
 			for(var d = 0; d < l; d++) {
 				h ^= (randTable2[bitmask[d]&0x000000FF])|0;
 				h *= FNV_prime;
@@ -490,6 +550,8 @@ var SolverCautious = (function() {
 	};
 	var tempPosns = [];
 	
+	var closedCyclePoints = {};
+	
 	function createOrFindNode(pred, action, actionH) {
 		var key = hashKey();
 		var minusPlayerKey = hashKey(state.playerMask);
@@ -502,6 +564,10 @@ var SolverCautious = (function() {
 		var existingInClosed = existingInOpen ? null : member(tempNode,closed);
 		if(existingInClosed && !existingInOpen) {
 			closedCycles++;
+			if(!(existingInClosed.key in closedCyclePoints)) {
+				closedCyclePoints[existingInClosed.key] = 0;
+			}
+			closedCyclePoints[existingInClosed.key]++;
 		}
 		var existingN = existingInClosed || existingInOpen;
 		var g = pred ? pred.g+gDiscount : 0;

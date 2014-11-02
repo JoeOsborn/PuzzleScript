@@ -655,6 +655,7 @@ var Analyzer = (function() {
 			}, handleSolver, tickLevelQueue);
 		} else {
 			workers[lev] = {init: { rules:gameRules, level:lev, mode:"fast", hint:hint, verbose:true }};
+			Solver.RANDOM_RESTART = Analyzer.RANDOM_RESTART;
 			Solver.startSearch({
 				rules:gameRules,
 				level:lev,

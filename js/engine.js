@@ -799,13 +799,13 @@ function DoRestart(force) {
 	}
 
 	restoreLevel(restartTarget);
+
 	tryPlayRestartSound();
 
 	if ('run_rules_on_level_start' in state.metadata) {
     	processInput(-1,true);
 	}
 	
-	clearCommands();
 }
 
 function DoUndo(force) {
@@ -1058,6 +1058,12 @@ BitVec.prototype.iand = function(other) {
 BitVec.prototype.ior = function(other) {
 	for (var i = 0; i < this.data.length; ++i) {
 		this.data[i] |= other.data[i];
+	}
+}
+
+BitVec.prototype.iflip = function() {
+	for (var i = 0; i < this.data.length; ++i) {
+		this.data[i] = ~this.data[i];
 	}
 }
 
@@ -2221,7 +2227,7 @@ function dirToBits(dir) {
 }
 
 /* returns a bool indicating if anything changed */
-function processInput(inputDir,dontCheckWin,dontModify,premadeBackup) {
+function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelOrRestart) {
 	againing = false;
 	
 	if(inputDir > 4) { return; }
@@ -2263,8 +2269,11 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup) {
 				consolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
 				consoleCacheDump();
 			}
-			backups.push(bak);
-			DoUndo(true);
+			if(!dontCancelOrRestart) {
+				backups.push(bak);
+				DoUndo(true);
+				cmd_cancel = true;
+			}
 			return false;
 		}
 		//play player cantmove sounds here
@@ -2276,8 +2285,11 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup) {
 			consolePrint('CANCEL command executed, cancelling turn.');
 			consoleCacheDump();
 		}
-		backups.push(bak);
-		DoUndo(true);
+		if(!dontCancelOrRestart) {
+			backups.push(bak);
+			DoUndo(true);
+			cmd_cancel = true;
+		}
 		return false;
 	} 
 
@@ -2286,9 +2298,14 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup) {
 			consolePrint('RESTART command executed, reverting to restart state.');
 			consoleCacheDump();
 		}
-		backups.push(bak);
-		DoRestart(true);
-		return true;
+		if(!dontCancelOrRestart) {
+			backups.push(bak);
+			DoRestart(true);
+			cmd_restart = true;
+			return true;
+		} else {
+			return false;
+		}
 	}
 	
 	//handle the dontModify case
@@ -2308,7 +2325,8 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup) {
 				return true;
 			} else {
 				if (dir!==-1) {
-						backups.push(bak);
+					//FIXME:why??
+					backups.push(bak);
 				}
 				modified=true;
 			}
@@ -2435,7 +2453,7 @@ function handleCommands(modified) {
 			var old_verbose_logging=verbose_logging;
 			var oldmessagetext = messagetext;
 			verbose_logging=false;
-			if (processInput(-1,true,true)) {
+			if(processInput(-1,true,true,null,false)) {
 				verbose_logging=old_verbose_logging;
 
 				if (verbose_logging) { 
@@ -2454,7 +2472,6 @@ function handleCommands(modified) {
 			messagetext = oldmessagetext;
 		}		
 	}
-	clearCommands();
 
 	return modified;
 }

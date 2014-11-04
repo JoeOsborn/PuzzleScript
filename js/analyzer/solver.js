@@ -84,6 +84,7 @@ var Solver = (function() {
 		Utilities.incrementRuleCount(storedRuleCounts,module.LEVEL,storedRuleCategory,ruleGroup,ruleIndex);
 	};
 
+	var AGAIN_LIMIT = 100;
 	module.getRuleCounts = function(prefix) {
 		var retval = [];
 		//alias storedRuleCounts to our return value
@@ -94,10 +95,13 @@ var Solver = (function() {
 		winning=false;
 		restoreLevel(module.INIT_LEVEL);
 		//run prefix
+		var again = 0;
 		for(var i = 0; i < prefix.length; i++) {
-			processInput(prefix[i]);
-			while(againing) {
-				processInput(-1);
+			processInput(prefix[i],false,false,null,false,true);
+			while(againing && again <= AGAIN_LIMIT) {
+				processInput(-1,false,false,null,false,true);
+				//TODO: detect loops
+				again++;
 			}
 		}
 		unregisterApplyAtWatcher(ruleApplied);

@@ -2227,7 +2227,7 @@ function dirToBits(dir) {
 }
 
 /* returns a bool indicating if anything changed */
-function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelOrRestart) {
+function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelOrRestart,shortcutAgain) {
 	againing = false;
 	
 	if(inputDir > 4) { return; }
@@ -2348,7 +2348,7 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 		checkWin();
 	}
 
-	var anyChanges = handleCommands(modified);
+	var anyChanges = handleCommands(dir, modified, shortcutAgain, dontCancelOrRestart);
 
 	if (verbose_logging) {
 		consoleCacheDump();
@@ -2410,7 +2410,7 @@ function runAllRules(dir,bak) {
 	startRuleGroupIndex=0;		
 }
 
-function handleCommands(modified) {
+function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 	for (var i=0;i<seedsToPlay_CantMove.length;i++) {
 		playSound(seedsToPlay_CantMove[i]);
 	}
@@ -2441,7 +2441,7 @@ function handleCommands(modified) {
 	}
 
 	if (!winning) {
-		if (cmd_checkpoint) {
+		if (cmd_checkpoint && !skipCheckpoint) {
 			if (verbose_logging) { 
 				consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
 			}
@@ -2450,27 +2450,42 @@ function handleCommands(modified) {
 
 		if (cmd_again && modified) {
 			//first have to verify that something's changed
-			var old_verbose_logging=verbose_logging;
-			var oldmessagetext = messagetext;
-			verbose_logging=false;
-			if(processInput(-1,true,true,null,false)) {
-				verbose_logging=old_verbose_logging;
-
-				if (verbose_logging) { 
-					consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
+			if(shortcutAgain) {
+				if(dir == -1 && !modified) {
+					if (verbose_logging) {
+						consolePrint('AGAIN command executed, but no changes occurred. Will not execute any more turns.');
+					}
+					againing = false;
+				} else {
+					if (verbose_logging) { 
+						consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
+					}
+					againing = true;
+					timer = 0;
 				}
-
-				againing=true;
-				timer=0;
-			} else {					
-				verbose_logging=old_verbose_logging;
-				if (verbose_logging) { 
-					consolePrint('AGAIN command not executed, it wouldn\'t make any changes.');
+			} else {
+				var old_verbose_logging=verbose_logging;
+				var oldmessagetext = messagetext;
+				verbose_logging=false;
+				if(processInput(-1,true,true,null,false,false)) {
+					verbose_logging=old_verbose_logging;
+      	
+					if (verbose_logging) { 
+						consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
+					}
+      	
+					againing=true;
+					timer=0;
+				} else {					
+					verbose_logging=old_verbose_logging;
+					if (verbose_logging) { 
+						consolePrint('AGAIN command not executed, it wouldn\'t make any changes.');
+					}
 				}
+				verbose_logging=old_verbose_logging;
+				messagetext = oldmessagetext;
 			}
-			verbose_logging=old_verbose_logging;
-			messagetext = oldmessagetext;
-		}		
+		}
 	}
 
 	return modified;

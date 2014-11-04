@@ -15,7 +15,7 @@ var Analyzer = (function() {
 	
 	module.mode = module.MODE_NORMAL;
 	
-	var USE_WORKERS = false;
+	var USE_WORKERS = true;
 	var RANDOM_RESTART = false;
 	var AUTO_HINT = false;
 	var INPUT_MAPPING = {};
@@ -282,9 +282,10 @@ var Analyzer = (function() {
 				return false;
 			}
 			var again = 0;
-			processInput(step);
+			processInput(step,false,false,null,false,true);
 			while(againing && again <= AGAIN_LIMIT) {
-				processInput(-1);
+				processInput(-1,false,false,null,false,true);
+				//TODO: detect loops
 				again++;
 			}
 			if(again >= AGAIN_LIMIT) {

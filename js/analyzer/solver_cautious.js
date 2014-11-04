@@ -1,5 +1,3 @@
-var rowCollisionCount=0;
-var colCollisionCount=0;
 var collisionCount=0;
 var findCount=0;
 
@@ -25,25 +23,25 @@ var SolverCautious = (function() {
 	OPPOSITE_ACTIONS[LEFT] = RIGHT;
 	OPPOSITE_ACTIONS[RIGHT] = LEFT;
 	
-	var BACK_STEPS;
+	var BACK_STEPS="some";
 	//"all": "allow all moves back"
 	//"some": "allow moves back only if the map configuration (ignoring the player) has changed between the predecessor and now."
 	//"none": "allow no moves back"
 
-	var ITERS_PER_CONTINUATION;
-	var ITER_MAX;
+	var ITERS_PER_CONTINUATION=20000;
+	var ITER_MAX=1000000;
 	
-	var BACK_STEP_PENALTY;
-	var SEEN_SPOT_PENALTY;
+	var BACK_STEP_PENALTY=10;
+	var SEEN_SPOT_PENALTY=0.00001;
 	
-	var ACTIONS;	
+	var ACTIONS;
 
 	var FIRST_SOLUTION_ONLY = true;
 	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
 	//Longer -> lower value for gDiscount
 	//For shortish games, maybe even set hDiscount=0
-	var hDiscount = 1.0;
-	var gDiscount = 0.5;
+	var hDiscount = 5.0;
+	var gDiscount = 1.0;
 	var gLimit = Infinity;
 
 	var pauseAfterNextSolution = false;
@@ -95,13 +93,13 @@ var SolverCautious = (function() {
 			gDiscount = 0.5;
 		}
 		
-		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", "some").toLowerCase();
-		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", "10"));
-		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", "0.00001"));
-		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", "0.2"));
-		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", "1.0"));
-		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", "100000"));
-		ITERS_PER_CONTINUATION = ITER_MAX;
+		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", BACK_STEPS).toLowerCase();
+		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", BACK_STEP_PENALTY));
+		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", SEEN_SPOT_PENALTY));
+		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", gDiscount));
+		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", hDiscount));
+		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", ITER_MAX));
+		ITERS_PER_CONTINUATION = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", ITERS_PER_CONTINUATION));
 
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
 			return {iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, fullyExhausted:true};
@@ -281,7 +279,7 @@ var SolverCautious = (function() {
 		var actionH = node.actionHs.pop();
 		//switch to this state, perform action, createOrFindNode()
 		switchToSearchState(node);
-		if(!processInput(action,false,false,node.backup,true) || cmd_cancel || cmd_restart) {
+		if(!processInput(action,false,false,node.backup,true,true) || cmd_cancel || cmd_restart) {
 			return node;
 		}
 		if(cmd_checkpoint) {
@@ -289,7 +287,9 @@ var SolverCautious = (function() {
 		}
 		var againIters = 0;
 		while(againing && againIters < AGAIN_LIMIT) {
-			processInput(-1);
+			processInput(-1,false,false,null,true,true);
+			if(cmd_cancel || cmd_restart) { againing = false; }
+			//TODO: detect loops
 			againIters++;
 			if(cmd_checkpoint) {
 				//TODO: bump this node's H value?
@@ -457,50 +457,48 @@ var SolverCautious = (function() {
 		h += ( h << 15 )|0;
 		return h;
 	}
-	
-	function hashKey2(rearrangeMask) {
+
+	function hashKey2Int(h, int32) {
+		h += (randTable[int32&0x000000FF])|0;
+		h += (h << 10)|0;
+		h ^= (h >> 6)|0;
+		h += (randTable[(int32>>8)&0x000000FF])|0;
+		h += (h << 10)|0;
+		h ^= (h >> 6)|0;
+		h += (randTable[(int32>>16)&0x000000FF])|0;
+		h += (h << 10)|0;
+		h ^= (h >> 6)|0;
+		h += (randTable[(int32>>24)&0x000000FF])|0;
+		h += (h << 10)|0;
+		h ^= (h >> 6)|0;
+		return h;
+	}
+	function hashKey2() {
 		var h = 2166136261|0;
 		var l = STRIDE_OBJ|0;
-		var FNV_prime = 16777619|0;
 		var tiles = level.n_tiles;
-		rearrangedCount = 0;
+		var runLength = 0;
+		var runStart = _oA;
+		var cur = _oB;
+		level.getCellInto(0, runStart);
+		var tilesMinusOne = tiles - 1;
 		for(var i = 0; i < tiles; i++) {
-			level.getCellInto(i,_oA);
-			if(rearrangeMask) {
-				if(!rearranged[rearrangedCount]) {
-					rearranged[rearrangedCount] = _oA.clone();
-				} else {
-					_oA.cloneInto(rearranged[rearrangedCount]);
+			level.getCellInto(i, cur);
+			if(cur.equals(runStart)) {
+				runLength++;
+			} else {
+				for(var d = 0; d < l; d++) {
+					h = hashKey2Int(h, cur.data[d]);
 				}
-				rearranged[rearrangedCount].iand(rearrangeMask);
-				rearrangedCount++;
-				_oA.iclear(rearrangeMask);
-			}
-			var bitmask = _oA.data;
-			for(var d = 0; d < l; d++) {
-				h ^= (randTable2[bitmask[d]&0x000000FF])|0;
-				h *= FNV_prime;
-				h ^= (randTable2[(bitmask[d]>>8)&0x000000FF])|0;
-				h *= FNV_prime;
-				h ^= (randTable2[(bitmask[d]>>16)&0x000000FF])|0;
-				h *= FNV_prime;
-				h ^= (randTable2[(bitmask[d]>>24)&0x000000FF])|0;
-				h *= FNV_prime;
+				h = hashKey2Int(h, runLength);
+				runLength = 1;
+				cur.cloneInto(runStart);
 			}
 		}
-		for(i = 0; i < rearrangedCount; i++) {
-			var bitmask = rearranged[i].data;
-			for(var d = 0; d < l; d++) {
-				h ^= (randTable2[bitmask[d]&0x000000FF])|0;
-				h *= FNV_prime;
-				h ^= (randTable2[(bitmask[d]>>8)&0x000000FF])|0;
-				h *= FNV_prime;
-				h ^= (randTable2[(bitmask[d]>>16)&0x000000FF])|0;
-				h *= FNV_prime;
-				h ^= (randTable2[(bitmask[d]>>24)&0x000000FF])|0;
-				h *= FNV_prime;
-			}
+		for(var d = 0; d < l; d++) {
+			h = hashKey2Int(h, runStart.data[d]);
 		}
+		h = hashKey2Int(h, runLength);
 		return h;		
 	}
 	
@@ -544,7 +542,8 @@ var SolverCautious = (function() {
 		firstPrefix:[],
 		winning:false,
 		eventualSolutions:[],
-		key:-1|0,
+		key0:-1|0,
+		key1:-1|0,
 		minusPlayerKey:-1|0,
 		f:0, g:0, h:0
 	};
@@ -553,10 +552,12 @@ var SolverCautious = (function() {
 	var closedCyclePoints = {};
 	
 	function createOrFindNode(pred, action, actionH) {
-		var key = hashKey();
+		var key0 = hashKey();
+		var key1 = hashKey2();
 		var minusPlayerKey = hashKey(state.playerMask);
 		tempNode.winning = winning;
-		tempNode.key = key;
+		tempNode.key0 = key0;
+		tempNode.key1 = key1;
 		var existingInOpen = member(tempNode,open);
 		if(existingInOpen) {
 			openCycles++;
@@ -564,10 +565,13 @@ var SolverCautious = (function() {
 		var existingInClosed = existingInOpen ? null : member(tempNode,closed);
 		if(existingInClosed && !existingInOpen) {
 			closedCycles++;
-			if(!(existingInClosed.key in closedCyclePoints)) {
-				closedCyclePoints[existingInClosed.key] = 0;
+			if(!(existingInClosed.key0 in closedCyclePoints)) {
+				closedCyclePoints[existingInClosed.key0] = {};
 			}
-			closedCyclePoints[existingInClosed.key]++;
+			if(!(existingInClosed.key1 in closedCyclePoints[existingInClosed.key0])) {
+				closedCyclePoints[existingInClosed.key0][existingInClosed.key1] = 0;
+			}
+			closedCyclePoints[existingInClosed.key0][existingInClosed.key1]++;
 		}
 		var existingN = existingInClosed || existingInOpen;
 		var g = pred ? pred.g+gDiscount : 0;
@@ -620,7 +624,8 @@ var SolverCautious = (function() {
 			winning:winning,
 			eventualSolutions:[],
 			//indexing optimization:
-			key:key,
+			key0:key0,
+			key1:key1,
 			minusPlayerKey:minusPlayerKey,
 			f:g+h, g:g, h:h
 		};
@@ -844,32 +849,41 @@ var SolverCautious = (function() {
 	}
 	
 	function getInnerSet(node,set) {
-		if(!(node.key in set)) {
-			set[node.key] = [];
+		if(!(node.key0 in set)) {
+			set[node.key0] = {};
 		}
-		return set[node.key];
+		if(!(node.key1 in set[node.key0])) {
+			set[node.key0][node.key1] = [];
+		}
+		return set[node.key0][node.key1];
+
+		// if(!(node.key0 in set)) {
+		// 	set[node.key0] = [];
+		// }
+		// return set[node.key0];
 	}
 
 	function equiv(n1,n2) {
 		if(n1 == n2) { return true; }
-		if(n1.key != n2.key) { return false; }
+		if(n1.key0 != n2.key0) { return false; }
+		if(n1.key1 != n2.key1) { return false; }
 		if(n1.winning != n2.winning) { return false; }
-		
-		var n1BakObjs = null;
-		if(n1.backup && n1.backup.dat) {
-			n1BakObjs = n1.backup.dat;
-		} else {
-			n1BakObjs = level.objects;
-		}
-		var n2BakObjs = n2.backup.dat;
-		if(n1BakObjs.length != n2BakObjs.length) { return false; }
-		
-		for(var i=0; i < n1BakObjs.length; i++) {
-			if(n1BakObjs[i] != n2BakObjs[i]) { 
-				collisionCount++;
-				return false; 
-			}
-		}
+		//
+		// var n1BakObjs = null;
+		// if(n1.backup && n1.backup.dat) {
+		// 	n1BakObjs = n1.backup.dat;
+		// } else {
+		// 	n1BakObjs = level.objects;
+		// }
+		// var n2BakObjs = n2.backup.dat;
+		// if(n1BakObjs.length != n2BakObjs.length) { return false; }
+		//
+		// for(var i=0; i < n1BakObjs.length; i++) {
+		// 	if(n1BakObjs[i] != n2BakObjs[i]) {
+		// 		collisionCount++;
+		// 		return false;
+		// 	}
+		// }
 		findCount++;
 		return true;
 	}

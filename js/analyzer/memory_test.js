@@ -133,9 +133,11 @@ var MemoryTest = (function() {
 			var action = ACTIONS[ai];
 			//switch to this state, perform action, createOrFindNode()
 			switchToSearchState(node);
-			processInput(action,false,false,node.backup);
-			while(againing) {
-				processInput(-1);
+			processInput(action,false,false,node.backup,false,true);
+			while(againing && again <= AGAIN_LIMIT) {
+				processInput(-1,false,false,null,false,true);
+				//TODO: detect loops
+				again++;
 			}
 			var currentNode = createOrFindNode(node,action);
 			if(track) {

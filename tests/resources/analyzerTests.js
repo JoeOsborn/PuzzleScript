@@ -1,70 +1,70 @@
 var testLocalGames = [
-	"atlas shrank"//,
-	// "blockfaker",
-	// "bouncers",
-	// "byyourside",
-	// "cakemonsters",
-	// "castlemouse",
-	// "chaos wizard",
-	// "collapse",
-	// "color chained",
-	// "constellationz",
-	// "cratopia",
-	// "cute train",
-	// "diesinthelight",
-	// "dropswap",
-	// "dungeonjanitor",
-	// "ebony and ivory",
-	// "equestrianarmageddon",
-	// "gobble_rush",
-	// "heroes_of_sokoban",
-	// "heroes_of_sokoban_2",
-	// "heroes_of_sokoban_3",
-	// "icecrates",
-	// "kettle",
-	// "ledchallenge",
-	// "legend of zokoban",
-	// "limerick",
-	// "lovendpieces",
-	// "lunar_lockout",
-	// "m c eschers armageddon",
-	// "manic_ammo",
-	// "mazezam",
-	// "microban",
-	// "midas",
-	// "modality",
-	// "naughtysprite",
-	// "nekopuzzle",
-	// "notsnake",
-	// "octat",
-	// "ponies jumping synchronously",
-	// "push",
-	// "puzzles",
-	// "riverpuzzle",
-	// "robotarm",
-	// "scriptcross",
-	// "slidings",
-	// "smother",
-	// "sok7",
-	// "sokoban_basic",
-	// "sokoban_horizontal",
-	// "sokoban_match3",
-	// "sokoban_sticky",
-	// "sokobond demake",
-	// "stick_candy_puzzle_saga",
-	// "sumo",
-	// "take heart lass",
-	// "the_saga_of_the_candy_scroll",
-	// "threes",
-	// "tiny treasure hunt",
-	// "tunnel rat",
-	// "whaleworld",
-	// "wordgame",
-	// "wrappingrecipe",
-	// "zenpuzzlegarden"
+	"atlas shrank",
+	"blockfaker",
+	"bouncers",
+	"byyourside",
+	"cakemonsters",
+	"castlemouse",
+	"chaos wizard",
+	"collapse",
+	"color chained",
+	"constellationz",
+	"cratopia",
+	"cute train",
+	"diesinthelight",
+	"dropswap",
+	"dungeonjanitor",
+	"ebony and ivory",
+	"equestrianarmageddon",
+	"gobble_rush",
+	"heroes_of_sokoban",
+	"heroes_of_sokoban_2",
+	"heroes_of_sokoban_3",
+	"icecrates",
+	"kettle",
+	"ledchallenge",
+	"legend of zokoban",
+	"limerick",
+	"lovendpieces",
+	"lunar_lockout",
+	"m c eschers armageddon",
+	"manic_ammo",
+	"mazezam",
+	"microban",
+	"midas",
+	"modality",
+	"naughtysprite",
+	"nekopuzzle",
+	"notsnake",
+	"octat",
+	"ponies jumping synchronously",
+	"push",
+	"puzzles",
+	"riverpuzzle",
+	"robotarm",
+	"scriptcross",
+	"slidings",
+	"smother",
+	"sok7",
+	"sokoban_basic",
+	"sokoban_horizontal",
+	"sokoban_match3",
+	"sokoban_sticky",
+	"sokobond demake",
+	"stick_candy_puzzle_saga",
+	"sumo",
+	"take heart lass",
+	"the_saga_of_the_candy_scroll",
+	"threes",
+	"tiny treasure hunt",
+	"tunnel rat",
+	"whaleworld",
+	"wordgame",
+	"wrappingrecipe",
+	"zenpuzzlegarden"
 ];
 var testRemoteGames = [
-	//gallery
+	// //gallery
 	// "eb0f9102f85b5ea536b1", //singleton traffic
 	// "9440559", //Pants, Shirt, Cap
 	// "ee4c36def9a6847d6308", //Space valet
@@ -85,6 +85,7 @@ var testRemoteGames = [
 	// "e3e444f7c63fb21b6ec0", //cyber lasso
 	// "9027730", //Happy Birthday Hennell: Sokoban Edition 2014
 	// //forum
+	// "8cbe871f8c0d59fab93b", //honey giants
 	// "4e0d1c8757978c897b93", //pumpkin smasher
 	// "6850739", //run at sign run
 	// "6893197", //little dungeons
@@ -271,14 +272,39 @@ var testRemoteGames = [
 //get stats for every level of every game:
 //how long it took to get first answer (in iters and in seconds), how many answers in M iters & N seconds
 
-setTimeout(function() {
-for(var i=0;i<testLocalGames.length;i++) {
-	testLocalGame(testLocalGames[i]);
-}
-for(var i=0;i<testRemoteGames.length;i++) {
-	testRemoteGame(testRemoteGames[i]);
-}
-},2000);
+SolverCautious.BACK_STEPS = "some";
+SolverCautious.BACK_STEP_PENALTY = "10";
+SolverCautious.SEEN_SPOT_PENALTY = "0.00001";
+SolverCautious.gDiscount = "1.0";
+SolverCautious.hDiscount = "5.0";
+SolverCautious.ITER_MAX = "1000000";
+SolverCautious.ITERS_PER_CONTINUATION = "1000";
+
+var gameIdx = 0, solving = false;
+var firstTest, secondTest;
+firstTest = setInterval(function() {
+	if(solving || gameIdx >= testLocalGames.length) { return; }
+	solving = true;
+	testLocalGame(testLocalGames[gameIdx], function() {
+		solving = false;
+		gameIdx++;
+		if(gameIdx >= testLocalGames.length) {
+			clearInterval(firstTest);
+			gameIdx = 0;
+			secondTest = setInterval(function() {
+				if(solving || gameIdx >= testRemoteGames.length) { return; }
+				solving = true;
+				testRemoteGame(testRemoteGames[gameIdx], function() {
+					solving = false;
+					gameIdx++;
+					if(gameIdx >= testRemoteGames.length) {
+						clearInterval(secondTest);
+					}
+				});
+			}, 1000);
+		}
+	});
+},1000);
 
 function tryLoadGist(id,cb) {
 	var githubURL = 'https://api.github.com/gists/'+id;
@@ -313,11 +339,7 @@ function tryLoadGist(id,cb) {
 				}
 			}
 			if(code) {
-				for(var l = 0; l < state.levels.length; l++) {
-					if(!state.levels[l].message) {
-						cb(code,l);
-					}
-				}
+				testGame(code,cb);
 			} else {
 				throw("No valid code in gist "+id);
 			}
@@ -339,21 +361,42 @@ function tryLoadFile(fileName, cb) {
 		}
 		unloadGame();
 		var code = fileOpenClient.responseText;	
-		compile(["restart"],code);
-		for(var l = 0; l < state.levels.length; l++) {
-			if(!state.levels[l].message) {
-				cb(code,l);
-			}
-		}
+		testGame(code, cb);
 	}
 	fileOpenClient.send();
 }
 
+function testGame(code, cb) {
+	compile(["restart"],code);
+	var solving = false;
+	var testLevel = 0;
+	var tester = setInterval(function() {
+		if(solving || testLevel >= state.levels.length) { return; }
+		solving = true;
+		if(!state.levels[testLevel].message) {
+			testGameLevel(code,testLevel);
+		} else {
+			//nop
+		}
+		solving = false;
+		testLevel++;
+		if(testLevel >= state.levels.length) {
+			clearInterval(tester);
+			cb();
+		}
+	}, 100);
+}
+
+var TIME_BUDGET = 30*1000; //30 seconds, in ms
+
 function testGameLevel(code, lev) {
+	SolverCautious.ITERS_PER_CONTINUATION = 1000;
 	QUnit.test("Game:\""+state.metadata.title+"\", level:"+lev, function(assert) {
 		expect(1);
 		var solutions = [];
 		var fullyExhausted = false;
+		var timeSpent = 0;
+		var startTime = Date.now();
 		var resp = Solver.startSearch({
 			rules:code,
 			level:lev,
@@ -380,23 +423,28 @@ function testGameLevel(code, lev) {
 				}
 			}
 		});
-		while(resp && resp.continuation && solutions.length == 0) {
+		timeSpent = Date.now() - startTime;
+		while(resp && resp.continuation && solutions.length == 0 && timeSpent <= TIME_BUDGET) {
 			resp = Solver.continueSearch(resp.continuation);
-			//TODO: if out of time budget, fail
+			timeSpent = Date.now() - startTime;
 		}
 		if(solutions.length) {
 			assert.ok(true,"Game:\""+state.metadata.title+"\", level:"+lev+" solved.");
+		} else if(fullyExhausted) {
+			assert.ok(false,"Game:\""+state.metadata.title+"\", level:"+lev+" not solved (unsolvable).");
+		} else if (timeSpent <= TIME_BUDGET) {
+			assert.ok(false,"Game:\""+state.metadata.title+"\", level:"+lev+" not solved (exhausted iterations).");
 		} else {
-			assert.ok(false,"Game:\""+state.metadata.title+"\", level:"+lev+" not solved "+(fullyExhausted ? "(unsolvable)." : "(exhausted iterations)."));
+			assert.ok(false,"Game:\""+state.metadata.title+"\", level:"+lev+" not solved (out of time).");
 		}
 	});
 }
 
-function testLocalGame(id) {
-	tryLoadFile(id,testGameLevel);
+function testLocalGame(id,cb) {
+	tryLoadFile(id,cb);
 }
-function testRemoteGame(id) {
-	tryLoadGist(id,testGameLevel);
+function testRemoteGame(id,cb) {
+	tryLoadGist(id,cb);
 }
 
 function error(msg) {

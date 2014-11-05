@@ -443,6 +443,64 @@ function levelFromString(state,level) {
 	}
 	return o;
 }
+
+function compile2DPattern(level,lineNo,pat) {
+	var name = "p2d_"+lineNo;
+	var backgroundlayer=state.backgroundlayer;
+	var backgroundid=state.backgroundid;
+	var backgroundLayerMask = state.layerMasks[backgroundlayer];
+	var width = pat[0].length;
+	var height = pat.length;
+	var layerCount = state.collisionLayers.length;
+	var functionBody = ["\tvar obj=0|0;"];
+	var functionBody = ["\tvar i=i0|0;"];
+	var levelBackgroundMask = level.calcBackgroundMask(state);
+	for(var i = 0; i < width; i++) {
+		for(var j = 0; j < height; j++) {
+			var ch = pat[j].charAt(i);
+			if (ch.length==0) {
+				ch=pat[j].charAt(pat[j].length-1);
+			}
+			var mask = state.glyphDict[ch];
+			var isAll = true;
+			if(mask == undefined) {
+				if(state.propertiesDict[ch]) {
+					mask = state.propertiesDict[ch].map(function(nom) { return state.glyphDict[nom]; });
+					isAll = false;
+				}
+				if(!mask) {
+					logError('Error, symbol "' + ch + '", used in 2D pattern, not found.', lineNo+j);
+				}
+			}
+			var maskint = new BitVec(STRIDE_OBJ);
+			mask = mask.slice();
+			for(var z = 0; z < layerCount; z++) {
+				if(mask[z]>=0) {
+					maskint.ibitset(mask[z]);
+				}
+			}
+			maskint.ior(levelBackgroundMask);
+			for(var w = 0; w < STRIDE_OBJ; ++w) {
+				functionBody.push("\tobj = level.objects["+STRIDE_OBJ+" * i + " + (STRIDE_OBJ*j+w) + "];");
+				if(isAll) { //this == target
+					functionBody.push("\tif(obj != "+maskint.data[w]+") { return false; }");
+				} else { //this & target != 0
+					functionBody.push("\tif((obj & "+maskint.data[w]+") == 0) { return false; }");
+				}
+			}
+		}
+		functionBody.push("\ti += "+level.height+";");
+	}
+	functionBody.push("\treturn true;");
+
+	global.eval(["function pat2D_match_"+name+"(i0) {"].
+		concat(functionBody).
+		concat(["}"]).
+		join("\n")
+	);
+	return "pat2D_match_"+name;
+}
+
 //also assigns glyphDict
 function levelsToArray(state) {
 	var levels = state.levels;

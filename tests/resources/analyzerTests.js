@@ -266,7 +266,8 @@ var testRemoteGames = [
 	// "9128725", //touchdown heroes
 	// "9065838", //sokobot
 	// "7381081", //elevator simulator
-	// "2db388ed325ecca43cd2" //stand
+	// "2db388ed325ecca43cd2", //stand
+	// "44db0cd60ac600746bad" //party demon
 ];
 
 //get stats for every level of every game:

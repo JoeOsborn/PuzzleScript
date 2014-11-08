@@ -444,7 +444,7 @@ function levelFromString(state,level) {
 	return o;
 }
 
-function compile2DPattern(level,lineNo,pat) {
+function compile2DPattern(lineNo,pat) {
 	var name = "p2d_"+lineNo;
 	var backgroundlayer=state.backgroundlayer;
 	var backgroundid=state.backgroundid;
@@ -452,9 +452,11 @@ function compile2DPattern(level,lineNo,pat) {
 	var width = pat[0].length;
 	var height = pat.length;
 	var layerCount = state.collisionLayers.length;
-	var functionBody = ["\tvar obj=0|0;"];
-	var functionBody = ["\tvar i=i0|0;"];
-	var levelBackgroundMask = level.calcBackgroundMask(state);
+	var functionBody = [
+		"\tvar obj=0|0;",
+		"\tvar i=i0|0;"
+	];
+	var levelBackgroundMask = state.layerMasks[state.backgroundlayer];
 	for(var i = 0; i < width; i++) {
 		for(var j = 0; j < height; j++) {
 			var ch = pat[j].charAt(i);
@@ -462,21 +464,33 @@ function compile2DPattern(level,lineNo,pat) {
 				ch=pat[j].charAt(pat[j].length-1);
 			}
 			var mask = state.glyphDict[ch];
+			var maskint;
 			var isAll = true;
 			if(mask == undefined) {
 				if(state.propertiesDict[ch]) {
 					mask = state.propertiesDict[ch].map(function(nom) { return state.glyphDict[nom]; });
+					if(ch == "?") {
+						//TODO: log an error that ? is used in the props dict?
+					}
+					isAll = false;
+				} else if(ch == "?") {
+					maskint = new BitVec(STRIDE_OBJ);
+					for(var z = 0; z < STRIDE_OBJ; z++) {
+						maskint.data[z] = 0xFFFFFFFF;
+					}
 					isAll = false;
 				}
-				if(!mask) {
+				if(!mask && !maskint) {
 					logError('Error, symbol "' + ch + '", used in 2D pattern, not found.', lineNo+j);
 				}
 			}
-			var maskint = new BitVec(STRIDE_OBJ);
-			mask = mask.slice();
-			for(var z = 0; z < layerCount; z++) {
-				if(mask[z]>=0) {
-					maskint.ibitset(mask[z]);
+			if(!maskint) {
+				maskint = new BitVec(STRIDE_OBJ);
+				mask = mask.slice();
+				for(var z = 0; z < layerCount; z++) {
+					if(mask[z]>=0) {
+						maskint.ibitset(mask[z]);
+					}
 				}
 			}
 			maskint.ior(levelBackgroundMask);
@@ -489,7 +503,7 @@ function compile2DPattern(level,lineNo,pat) {
 				}
 			}
 		}
-		functionBody.push("\ti += "+level.height+";");
+		functionBody.push("\ti += level.height;");
 	}
 	functionBody.push("\treturn true;");
 
@@ -498,7 +512,7 @@ function compile2DPattern(level,lineNo,pat) {
 		concat(["}"]).
 		join("\n")
 	);
-	return "pat2D_match_"+name;
+	return global["pat2D_match_"+name];
 }
 
 //also assigns glyphDict
@@ -2645,6 +2659,7 @@ function compileRules(state,rules,prefix) {
 		var ruleGroup = rules[i];
 		for(var j = 0; j < ruleGroup.length; j++) {
 			var rule = ruleGroup[j];
+			var ruleMatchedFunction;
 			var tabs = "\t";
 			var dir = rule.direction;
 			var matchChecks = [];
@@ -2780,6 +2795,14 @@ function compileRules(state,rules,prefix) {
 					for(var pm = 0; pm < rule.patterns.length; pm++) {
 						functionBody.push(tabs+"if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
 					}
+					ruleMatchedFunction = 
+						"function "+prefix+"rule"+i+"_"+j+"_matches(rule) {\n"+
+							(functionBody.
+								concat([tabs+"return true;"]).
+								concat(functionPost).
+								concat(["\treturn false;"])).
+							join("\n")+
+						"\n}";
 					functionBody.push(tabs+"anyMatches = true;");
 					if(rule.hasReplacements) {
 						functionBody.push(tabs+"var result = false;");
@@ -3062,10 +3085,12 @@ function compileRules(state,rules,prefix) {
 			}
 			try {
 				global.eval(
+					ruleMatchedFunction + "\n" +
 					ruleFunction + "\n" +
 					cellReplaceFunctions.join("\n") + "\n" + 
 					matchFunctions.join("\n") + "\n"
 				);
+				rule.anyMatchesFn = global[prefix+"rule"+i+"_"+j+"_matches"];
 				rule.tryApplyFn = global[prefix+"rule"+i+"_"+j];
 			} catch(e) {
 				console.log("failed! "+e);

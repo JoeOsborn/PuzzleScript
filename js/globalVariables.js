@@ -12,7 +12,7 @@ try {
 } catch(ex) {
 }
 
-
+var lastInputDir=-2;
 var verbose_logging=false;
 var throttle_movement=false;
 var cache_console_messages=false;

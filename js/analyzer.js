@@ -118,6 +118,7 @@ var Analyzer = (function() {
 		}
 		gameRules = text;
 		console.log("analyze "+command+" with "+randomseed+" in "+curlevel);
+		compileHints();
 		if(module.mode == module.MODE_MEM_TEST) {
 			killAllWorkers();
 			levelQueue = [];
@@ -248,91 +249,24 @@ var Analyzer = (function() {
 		//FIXME: scrumbles up the world state.
 		var oldLevel = curlevel;
 		var oldState = backupLevel();
+		var oldTesting = unitTesting;
+		var oldAuto = testsAutoAdvanceLevel;
 		if(lev != curlevel) {
 			compile(["loadLevel",lev]);
 		}
 		_ao1 = new BitVec(STRIDE_OBJ);
 		zero = new BitVec(STRIDE_OBJ);
 		zero.setZero();
-		var result = hintMatches_(steps, hint);
+		var result = hint.match(steps);
 		if(lev != oldLevel) {
 			compile(["loadLevel",oldLevel]);
 		}
 		restoreLevel(oldState);
+		unitTesting = oldTesting;
+		testsAutoAdvanceLevel = oldAuto;
 		return result;
 	}
-	
-	var AGAIN_LIMIT = 100;
-	
-	function hintMatches_(steps, hint) {
-		for(var i = 0; i < steps.length && i < hint.length; i++) {
-			var step = steps[i];
-			var hintStep = hint[i];
-			if(hintStep.move == CODE_DOTDOTDOT) {
-				if(i == hint.length - 1) { return true; }
-				for(var k = 0; k < steps.length - i; k++) {
-					if(hintMatches_(steps.slice(i+k), hint.slice(i+1))) {
-						return true;
-					}
-				}
-				return false;
-			} else if(hintStep.move == CODE_ANY_MOVE) {
-				
-			} else if(step != hintStep.move) {
-				return false;
-			}
-			var again = 0;
-			processInput(step,false,false,null,false,true);
-			while(againing && again <= AGAIN_LIMIT) {
-				processInput(-1,false,false,null,false,true);
-				//TODO: detect loops
-				again++;
-			}
-			if(again >= AGAIN_LIMIT) {
-				error("Too many again loops!");
-			}
-			if(!stateMatches(hintStep.state)) {
-				return false;
-			}
-			if(winning && i == steps.length - 1 && i == hint.length - 1) {
-				return true;
-			}
-		}
-		//Ran out of hint.
-		return false;
-	}
-	
-	function stateMatches(state) {
-		if(state == null) { return true; }
-		for(var x = 0; x <= level.width - state.width; x++) {
-			for(var y = 0; y <= level.height - state.height; y++) {
-				if(stateMatchesAt(state, x, y)) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-	
-	function stateMatchesAt(state, x, y) {
-		for(var stateX = 0; stateX < state.width; stateX++) {
-			for(var stateY = 0; stateY < state.height; stateY++) {
-				var stateI = stateX*state.width+stateY;
-				var levX = x + stateX;
-				var levY = y + stateY;
-				var levI = levX*level.width+levY;
-				var stateInMask = state.inPattern[stateI*STRIDE_OBJ];
-				var levMask = level.getCellInto(levI, _ao1);
-				if(!stateIn.iand(levMask).equals(levMask)) {
-					return false;
-				}
-				if(!stateOut.iand(levMask).equals(zero)) {
-					return false;
-				}
-			}
-		}
-	}
-	
+
 	function clearRuleCountDisplay() {
 		editor.clearGutter(analyzerRuleCountGutter);
 	}
@@ -434,7 +368,7 @@ var Analyzer = (function() {
 				//if a hint is prefix to the solution, highlight it green
 				//otherwise, highlight it red
 				if(seenSolutions[i].solved) {
-					var hints = hintsBetween(state.levels[i].lineNumber, nextLevelLine(i));
+					var hints = compiledLevelHints[i];
 					for(var j = 0; j < seenSolutions[i].matchedHints.length; j++) {
 						l = hints.ranges[j];
 						var hintClass = seenSolutions[i].matchedHints[j] ? hintUsedClass : hintUnusedClass;
@@ -553,36 +487,37 @@ var Analyzer = (function() {
 		return {remainder:str, hint:hint};
 	}
 	
+	var compiledLevelHints = {};
 	var hintStartRE = /\(\s*@HINT:/i;
-	function hintsBetween(l1, l2) {
-		var hints = [];
-		var ranges = [];
-		//find a (@HINT starting at or after l1 but before l2
-		//find the ) after that @HINT
-		//then parse it
-		var str = editor.getRange({line:l1},{line:l2});
-		var hintStartMatch;
-		var idx = editor.indexFromPos({line:l1});
-		while(hintStartMatch = str.match(hintStartRE)) {
-			idx += hintStartMatch.index+hintStartMatch[0].length;
-			var range = [editor.posFromIndex(idx)];
-			var hint = [];
-			str = str.substring(hintStartMatch.index+hintStartMatch[0].length).trim();
-			do {
-				var result = consumeHintElement(str);
-				idx += str.length-result.remainder.length;
-				str = result.remainder;
-				if(result.hint) {
-					hint.push(result.hint);
-				}
-			} while(result.hint);
-			hints.push(hint);
-			range.push(editor.posFromIndex(idx));
-			ranges.push(range);
+	function compileHints() {
+		for(var lev = 0; lev < state.levels.length; lev++) {
+			if(state.levels[lev].message) { continue; }
+			var l0 = state.levels[lev].lineNumber+1;
+			var l1 = nextLevelLine(lev);
+			var hints = [];
+			var ranges = [];
+			//find a (@HINT starting at or after l1 but before l2
+			//find the ) after that @HINT
+			//then parse it
+			var str = editor.getRange({line:l1},{line:l2});
+			var hintStartMatch;
+			var idx = editor.indexFromPos({line:l1});
+			while(hintStartMatch = str.match(hintStartRE)) {
+				idx += hintStartMatch.index+hintStartMatch[0].length;
+				var range = [editor.posFromIndex(idx), null];
+				str = str.substring(hintStartMatch.index+hintStartMatch[0].length).trim();
+				var result = HintCompiler.compileHintBody(str,range[0]);
+				hints.push(result.hint);
+				idx += str.length - result.remainder.length + 1; //drop the ) too
+				str = result.remainder.substring(1);
+				range[1] = editor.posFromIndex(idx);
+				ranges.push(range);
+			}
+			compiledLevelHints[lev] = {hints:hints, ranges:ranges};
 		}
-		return {hints:hints, ranges:ranges};
+		return compiledLevelHints;
 	}
-
+	
 	function annotationsBetween(l1, l2) {
 		var annos = [];
 		for(var l = l1; l < l2; l++) {
@@ -624,7 +559,7 @@ var Analyzer = (function() {
 	}
 	
 	function levelHint(lev) {
-		var userHints = hintsBetween(state.levels[lev].lineNumber+1, nextLevelLine(lev));
+		var userHints = compiledLevelHints[lev];
 		var solPrefixes = AUTO_HINT && seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev].prefixes : [];
 		userHints.hints = userHints.hints.concat(solPrefixes.map(function(pref) {
 			return pref.map(function(move) {
@@ -885,7 +820,7 @@ var Analyzer = (function() {
 			seenSolutions[level].exhaustive = data.queueLength == 0;
 		}
 		
-		var hints = hintsBetween(state.levels[level].lineNumber, nextLevelLine(Level));
+		var hints = compiledLevelHints[level];
 		for(var j = 0; j < hints.ranges.length; j++) {
 			var matchedPrefixes = allMatchingHint(
 				//FIXME: seed issues?

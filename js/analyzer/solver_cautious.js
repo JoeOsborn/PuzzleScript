@@ -116,7 +116,8 @@ var SolverCautious = (function() {
 
 		open = initSet();
 		closed = initSet();
-		q = new priority_queue.PriorityQueue(function(a,b) { return a.f-b.f; });
+		//Sort by F, break ties by H.
+		q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); });
 				
 		var initHDiscount = hDiscount;
 		var initGDiscount = gDiscount;

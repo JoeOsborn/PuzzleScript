@@ -1182,6 +1182,7 @@ function Rule(rule) {
 	this.cellRowMatches = [];
 	this.foundMatches = [];
 	this.tryApplyFn = null;
+	this.anyMatchesFn = null;
 	for (var i=0;i<this.patterns.length;i++) {
 		this.cellRowMatches.push(this.generateCellRowMatchesFunction(this.patterns[i],this.isEllipsis[i]));
 		this.foundMatches.push([]);
@@ -2231,6 +2232,8 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	againing = false;
 	
 	if(inputDir > 4) { return; }
+	
+	lastInputDir = inputDir;
 
 	if (verbose_logging) { 
 		if (inputDir===-1) {

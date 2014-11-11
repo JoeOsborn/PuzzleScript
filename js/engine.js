@@ -2227,14 +2227,27 @@ function dirToBits(dir) {
 	}
 }
 
+var AGAIN_LIMIT = 100;
+function runCompleteStep(inputDir) {
+	var again = 0;
+	var anyResults = processInput(step,false,false,null,false,true);
+	while(againing && again <= AGAIN_LIMIT) {
+		anyResults = processInput(-1,false,false,null,false,true) || anyResults;
+		//TODO: detect loops with a hash code?
+		again++;
+	}
+	if(again >= AGAIN_LIMIT) {
+		error("Too many again loops!");
+	}
+	return anyResults;
+}
+
 /* returns a bool indicating if anything changed */
 function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelOrRestart,shortcutAgain) {
 	againing = false;
 	
 	if(inputDir > 4) { return; }
 	
-	lastInputDir = inputDir;
-
 	if (verbose_logging) { 
 		if (inputDir===-1) {
 			consolePrint('Turn starts with no input.')

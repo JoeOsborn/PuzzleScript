@@ -1,8 +1,11 @@
+var global = this;
+
 var HintCompiler = (function() {
 	var module = {};
 	
 	var winningRE = /^winning\b/i;
-	var ellipsesRE = /^\.\.\./;
+	var finishedRE = /^finished\b/i;
+	var ellipsesRE = /^\.\.\.\s/;
 	
 	var thenRE = /^then\b/i;
 	var untilRE = /^until\b/i;
@@ -21,7 +24,7 @@ var HintCompiler = (function() {
 	//input: up or down or left or right or act
 	//any: up or down or left or right or act or wait
 	var directionRE = /^(up|down|left|right|moving|action|input|wait|any)\b/i;
-	var pattern2DRE = /^(2d\s*\n)((?:\S+\s*\n)+)\n/i;
+	var pattern2DRE = /^(2d\s*\n)((?:\s*\S+\s*\n)+)\n/i;
 	var pattern1DRE = /^((?:up|down|left|right|horizontal|vertical)\b)?\[([^\]]*)\]/i;
 
 	//TODO: put at least/at most/exactly into fireRE?
@@ -57,7 +60,7 @@ var HintCompiler = (function() {
 				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
 				return {type:name, metatype:metatype || "value", value:match[0].toLowerCase(), range:{start:pos,end:endPos}, length:match[0].length};
 			},
-			nud:function(tok,stream) { return {parse:tok.value, stream:stream}; },
+			nud:function(tok,stream) { return {parse:tok, stream:stream}; },
 			led:noLed,
 			lbp:0
 		}
@@ -75,15 +78,33 @@ var HintCompiler = (function() {
 
 	var TOKENS = [
 		symbol(winningRE, "winning", "predicate"),
+		symbol(winningRE, "finished", "predicate"),
 		symbol(ellipsesRE, "ellipses"),
 		{
 			type:"then",
 			match:matchSymbol(thenRE, "then"),
 			nud:noNud,
 			led:function(tok,stream,lhs) {
-				//left-associative operator
+				//left-associative n-ary operator
 				var rhs = parseHint(stream, 1);
-				return {parse:{type:"then", metatype:"temporal", steps:[lhs,rhs.parse]}, stream:rhs.stream};
+				var steps;
+				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
+				//Groups will not be distributed through. This is not vital for then's semantics, but it's convenient
+				//to consider groups as "inner machines".
+				//merge then(then(A,B),then(C,D)) into then(A,B,C,D)
+				if(lhs.type == "then" && rhs.parse.type == "then") {
+					steps = lhs.value.steps.concat(rhs.parse.value.steps);
+				//merge then(then(A,B),C) into then(A,B,C)
+				} else if(lhs.type == "then") {
+					steps = lhs.value.steps.concat([rhs.parse]);
+				//merge then(A,then(B,C)) into then(A,B,C)
+				} else if(rhs.parse.type == "then") {
+					steps = [lhs].concat(rhs.parse.value.steps);
+				//leave merge(A,B) as-is.
+				} else {
+					steps = [lhs,rhs.parse];
+				}
+				return {parse:{type:"then", metatype:"temporal", value:{steps:steps}}, stream:rhs.stream};
 			},
 			lbp:1
 		},
@@ -92,12 +113,35 @@ var HintCompiler = (function() {
 			match:matchSymbol(untilRE, "until"),
 			nud:noNud,
 			led:function(tok,stream,lhs) {
-				//left-associative operator
-				var rhs = parseHint(stream, 1);
-				return {parse:{type:"until", metatype:"temporal", steps:[lhs,rhs.parse]}, stream:rhs.stream};
+				//left-associative n-ary operator
+				var rhs = parseHint(stream, 2);
+				var steps;
+				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
+				//Groups will not be distributed through. This is important for until's semantics. Groups
+				//can be considered as "inner machines".
+				//merge until(until(A,B), until(C,D)) into until(A,B,C,D)
+				if(lhs.type == "until" && rhs.parse.type == "until") {
+					steps = lhs.value.steps.concat(rhs.parse.value.steps);
+				//merge until(until(A,B), C) into until(A,B,C)
+				} else if(lhs.type == "until") {
+					steps = lhs.value.steps.concat([rhs.parse]);
+				//merge until(A, until(B,C)) into until(A,B,C)
+				} else if(rhs.parse.type == "until") {
+					steps = [lhs].concat(rhs.parse.value.steps);
+				//leave until(A,B) as-is.
+				} else {
+					steps = [lhs,rhs.parse];
+				}
+				for(var si = 0; si < steps.length; si++) {
+					if(steps[si].type == "ellipses") {
+						throw new Error("Can't put ellipses into an until");
+					}
+				}
+				return {parse:{type:"until", metatype:"temporal", value:{steps:steps}}, stream:rhs.stream};
 			},
-			lbp:1
+			lbp:2
 		},
+		//TODO: AND and OR; similar to then or until (including n-ary reassociation). note: AND can only have states on either side; OR comes in "state OR state => state" and "state OR arrow => arrow" flavors and the two have distinct types and metatypes (predicate and temporal respectively). NOT also comes in predicate and temporal flavors. none of these can have an ellipses as an argument.
 		symbol(andRE, "and"),
 		symbol(orRE, "or"),
 		symbol(notRE, "not"),
@@ -110,7 +154,10 @@ var HintCompiler = (function() {
 				if(streamPrime.token.type != "rparen") {
 					throw new Error("Missing right paren after parenthesized group");
 				}
-				return {parse:parse.parse, stream:streamPrime};
+				if(parse.parse.type == "ellipses") {
+					throw new Error("Can't put ellipses into a group by themselves");
+				}
+				return {parse:{type:"group", metatype:"group", value:{contents:parse.parse}}, stream:streamPrime};
 			},
 			led:noLed,
 			lbp:0
@@ -217,50 +264,28 @@ var HintCompiler = (function() {
 					count:count
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			}
-		}
-		symbol(noRE, "no"),
-		symbol(allRE, "all"),
-		symbol(someRE, "some"),
-		symbol(onRE, "on"),
+		},
+		//non-associative n-ary operator? "permute permute x y z permute a b c" is ambiguous.
 		symbol(permuteRE, "permute"),
 		{
 			type:"direction",
 			match:function(str,pos) {
-				var match = re.exec(str);
+				var match = directionRE.exec(str);
 				if(!match) { return null; }
 				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
 				var dir = match[0].toLowerCase();
 				var dirs = {up:0,left:1,down:2,right:3,action:4};
 				var inputDir = (dir in dirs) ? dirs[dir] : -1;
-				return {type:name, metatype:"predicate", value:{
-					/*
-					var checkFn;
-					switch(dir) {
-						case "any":
-							checkFn = function() { return true; };
-							break;
-						case "wait":
-							checkFn = function() { return lastInputDir == -1; };
-							break;
-						case "input":
-							checkFn = function() { return lastInputDir >= 0; };
-							break;
-						case "moving":
-							checkFn = function() { return lastInputDir >= 0 && lastInputDir <= 3; };
-							break;
-						default:
-							checkFn = function() { return lastInputDir == inputDir; };
-							break;
-					}					
-					check:checkFn,*/
+				return {type:"direction", metatype:"predicate", value:{
 					direction:dir,
 					inputDir:inputDir
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok,stream) {
-				return {parse:tok.value, stream:stream};
+				return {parse:tok, stream:stream};
 			},
 			led:noLed
+		},
 		{
 			type:"fire",
 			match:function(str,pos) {
@@ -275,10 +300,10 @@ var HintCompiler = (function() {
 				}, range:{start:pos, end:endPos}, length:match[0].length};
 			},
 			nud:function(tok,stream) {
-				return {parse:tok.value, stream:stream};
+				return {parse:tok, stream:stream};
 			},
 			led:noLed
-		}
+		},
 		stringValue(identifierRE, "identifier"),
 		{
 			type:"pattern2D",
@@ -286,6 +311,7 @@ var HintCompiler = (function() {
 				var match = pattern2DRE.exec(str);
 				if(!match) { return null; }
 				var preMapLines = match[1].split("\n").length-1;
+				//TODO: check that any prefix of spaces is equal on all lines?
 				var lines = match[2].split("\n").map(function(levLine) { return levLine.trim(); });
 				var firstRealLine, firstRealLinePos;
 				var realLines = [];
@@ -306,7 +332,7 @@ var HintCompiler = (function() {
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok, stream) {
-				return {parse:tok.value, stream:stream};
+				return {parse:tok, stream:stream};
 			},
 			led:noLed,
 			lbp:0
@@ -349,7 +375,7 @@ var HintCompiler = (function() {
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok, stream) {
-				return {parse:tok.value, stream:stream};
+				return {parse:tok, stream:stream};
 			},
 			led:noLed,
 			lbp:0
@@ -363,7 +389,7 @@ var HintCompiler = (function() {
 				return {type:"int", metatype:"value", value:parseInt(match[1]), range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok, stream) {
-				return {parse:tok.value, stream:stream};
+				return {parse:tok, stream:stream};
 			},
 			led:noLed,
 			lbp:0
@@ -431,6 +457,7 @@ var HintCompiler = (function() {
 			}
 			streamPrime = consumeToken(stream);
 		}
+		//TODO: ensure nothing is to the right (arrow-wise) of a "finished" or a "winning" check
 		return {parse:parse, stream:stream};
 		/*
 		Hint := 
@@ -457,59 +484,185 @@ var HintCompiler = (function() {
 	module.parseHint = parseHint;
 	
 	var AGAIN_LIMIT = 100;
+
+	function nextStepStmt(tabs) {
+		return tabs+"si++;\n"+
+			tabs+"runCompleteStep(steps[si]);";
+	}
+	
+	function gensym(nom, hint) {
+		return nom + "_" + hint.range.start.line + "_" + hint.range.start.ch;
+	}
+
+	function storeStateStmt(tabs,si0,sid) {
+		return tabs+si0+" = si;\n"+
+			tabs+"backup_"+sid+".set(level.objects);";
+	}
+	function unwindStateStmt(tabs,si0,sid) {
+		return tabs+"si = "+si0+";\n"+
+			tabs+"level.objects.set(backup_"+sid+");";
+	}
+	var sid = 0;
+	function compileHintPart(tabs,hint,body,post) {
+		switch(hint.type) {
+			//NOTE: anywhere "do a step" or "runCompleteStep(step)" appears below, that's a step plus again loops.
+			case "then":
+				//include left hint's compiled form. if result == false or si == steps.length, fail; if result == true, do a step(si++), then insert the right hint (it might change result to false)
+				var steps = hint.value.steps;
+				for(var i = 0; i < steps.length; i++) {
+					var step = steps[i];
+					if(step.type == "ellipses") {
+						/*
+						var $si0 = si;
+						do {
+							$$storeState
+							
+							REST
+							
+							if(result) {
+								$$clearState
+								break;
+							}
+							unwind to $si0;
+							$si0++;
+							$$nextStep
+						} while($si0 < steps.length);
+						if($si0 >= steps.length) { result = false; }
+						*/
+						var si0 = gensym("si0",step);
+						body.push(
+							tabs+"var "+si0+" = si;",
+							tabs+"do {",
+							storeStateStmt(tabs+"\t",si0,sid),
+							//set result to true (it might have been set false on a previous trip through)
+							tabs+"\tresult = true;",
+							tabs+"\t//next hint part"
+						);
+						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
+						post.unshift(
+							tabs+"\tif(result) {",
+							tabs+"\t\tbreak;",
+							tabs+"\t}",
+							unwindStateStmt(tabs+"\t",si0,sid),
+							nextStepStmt(tabs+"\t"),
+							tabs+"} while("+si0+" < steps.length);",
+							tabs+"if("+si0+" >= steps.length) { result = false; }"
+						);
+						sid++;
+					} else {
+						/*
+						STEPS[i]
+						if(result) {
+							$$nextStep
+							
+							REST
+							
+						}
+						*/
+						tabs = compileHintPart(tabs,steps[i],body,post);
+						body.push(
+							tabs+"if(result) {"
+						);
+						if(i < steps.length -1) {
+							body.push(nextStepStmt("\t"+tabs));
+						}
+						body.push(tabs+"\t//next hint part");
+						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
+						post.unshift(
+							tabs+"}"
+						);
+					}
+					tabs = tabs + "\t";
+				}
+				break;
+			case "until":
+				//in a loop:
+				//  include right hint's compiled form.
+				//    if result==true, succeed & break
+				//    if result==false:
+				//      include left hint's compiled form.
+				//      if result==true and si < steps.length, do a step(si++) and continue in the loop
+				//      if result==false, fail
+				break;
+			case "group":
+				body.push(tabs+"//begin group");
+				post.unshift(tabs+"//end group");
+				tabs = compileHintPart(tabs, hint.value.contents, body, post);
+				break;
+			case "ellipses": //WARNING: may have to handle this in until and in then, since it may only appear on either side of an arrow, and then only by itself.
+				//if there is no more formula left, set si=steps.length and succeed
+				//store the state, si0=si
+				//call remainder of formula as a function (this may be the hard part? where does it come from? etc...)
+				//if that succeeds: succeed; otherwise: restore the state, si=si0, and...
+				//while si < steps.length
+				//  do a step (si++)
+				//  store the state, si0=si
+				//  call remainder of formula as a function
+				//  if that succeeds: succeed & break
+				//  if that fails: restore the state, si=si0
+				//fail
+				throw new Error("Ellipses not handled by an arrow.");
+				break;
+			//TODO: and/or/not with arrows (then or until, written below as ->) in one spot or the other might consume inputs. that needs to be unwound after evaluating the sides...
+			//"((a -> b) and (a -> (not c -> d)) or (d -> e -> f))" --- could consume either 2 or 3 inputs. only works semantically if it consumes NO inputs!
+			case "direction":
+				//succeed if checkfn body succeeds
+				switch(hint.value.direction) {
+					case "any":
+						body.push(tabs+"result = true;");
+						break;
+					case "wait":
+						body.push(tabs+"result = steps[si-1] == -1;");
+						break;
+					case "input":
+						body.push(tabs+"result = steps[si-1] != -1;");
+						break;
+					case "moving":
+						body.push(tabs+"result = steps[si-1] >= 0 && steps[si-1] <= 3;");
+						break;
+					default:
+						body.push(tabs+"result = steps[si-1] == "+hint.value.inputDir+";");
+						break;
+				}
+				break;
+			case "winning":
+				body.push(tabs+"result = winning;");
+				break;
+			case "finished":
+				body.push(tabs+"result = (si == steps.length);");
+				break;
+			default:
+				logError("Can't handle this kind of hint yet:"+JSON.stringify(hint));
+				break;
+		}
+		return tabs;
+	}
 	
 	module.compileHintBody = function compileHintBody(str,pos) {
+		sid = 0;
 		var result = parseHint({token:null,string:str,position:pos}, 0);
 		var hint = result.parse;
 		//drop the )
-		result.remainder = result.remainder.substring(result.remainder.indexOf(")")+1);
+		result.remainder = result.stream.string.substring(result.stream.string.indexOf(")")+1);
 		//now, compile to a function which ensures the hint is valid, starting from some arbitrary initial state.
-		var hintFn = [
-			"function hint_"+pos.line+"(steps) {", 
-			"\treturn false;",	
-			// 	for(var i = 0; i < steps.length && i < hint.length; i++) {
-			// 		var step = steps[i];
-			// 		var hintStep = hint[i];
-			// 		if(hintStep.move == CODE_DOTDOTDOT) {
-			// 			if(i == hint.length - 1) { return true; }
-			// 			for(var k = 0; k < steps.length - i; k++) {
-			// 				if(hintMatches_(steps.slice(i+k), hint.slice(i+1))) {
-			// 					return true;
-			// 				}
-			// 			}
-			// 			return false;
-			// 		} else if(hintStep.move == CODE_ANY_MOVE) {
-			//
-			// 		} else if(step != hintStep.move) {
-			// 			return false;
-			// 		}
-			// 		var again = 0;
-			// 		processInput(step,false,false,null,false,true);
-			// 		while(againing && again <= AGAIN_LIMIT) {
-			// 			processInput(-1,false,false,null,false,true);
-			// 			//TODO: detect loops
-			// 			again++;
-			// 		}
-			// 		if(again >= AGAIN_LIMIT) {
-			// 			error("Too many again loops!");
-			// 		}
-			// 		if(!stateMatches(hintStep.state)) {
-			// 			return false;
-			// 		}
-			// 		if(winning && i == steps.length - 1 && i == hint.length - 1) {
-			// 			return true;
-			// 		}
-			// 	}
-			// 	//Ran out of hint.
-			// 	return false;
-			// }
-			"}"].
-		join("\n");
-		var ctx = {};
+		var hintFnBody = [
+			"\tvar si = 0;",
+			"\tvar result = false;",
+			nextStepStmt("\t")
+		];
+		var hintFnPost = ["\treturn result;", "}"];
+		var tabs = "\t";
+		tabs = compileHintPart(tabs,hint,hintFnBody,hintFnPost);
+		var backups = [];
+		for(var i = 0; i < sid; i++) {
+			backups.push("\tvar backup_"+i+" = new Int32Array(level.n_tiles);");
+		}
+		hintFnBody.unshift()
+		var hintFn = ["function hint_"+pos.line+"(steps) {"].concat(backups).concat(hintFnBody).concat(hintFnPost).join("\n");
 		//TODO: try/catch/logError
-		ctx.eval(hintFn+"\n");
+		global.eval(hintFn+"\n");
 		result.hint = {
-			match:ctx["hint_"+pos.line]
+			match:global["hint_"+pos.line]
 		};
 		return result;
 	}

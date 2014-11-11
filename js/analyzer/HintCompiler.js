@@ -614,12 +614,6 @@ var HintCompiler = (function() {
 						tabs+"\t//until RHS "+si0
 					);
 					var oldTabs = tabs;
-					tabs = compileHintPart(tabs+"\t",nextStep,body,post);
-					body.push(
-						tabs+"if(result) { //resume "+si0
-					);
-					tabs = tabs + "\t";
-					//the rest of the machine will slide in right here. then...:
 					var preBody = [oldTabs+"\t//until LHS "+si0], prePost = [];
 					var lhsTabs = compileHintPart(oldTabs+"\t",step,preBody,prePost);
 					preBody.push(
@@ -630,18 +624,24 @@ var HintCompiler = (function() {
 						lhsTabs+"\tbreak "+si0+";",
 						lhsTabs+"}"
 					);
-					//FIXME: this whole "end hint part and LHS" chunk of si_0_0 is getting inserted BEFORE the end hint part of the deeper hint si_0_10! 
 					post.unshift.apply(post, 
-						[
-							oldTabs+"\t} // end hint part "+si0,
+						preBody.concat(prePost).concat([
+							// oldTabs+"\t} // end hint part "+si0,
 							unwindStateStmt(oldTabs+"\t",si0,mysid)
-						].
-						concat(preBody).concat(prePost).
+						]).
 						concat([
 							oldTabs+"\tif(!result) { break "+si0+"; }",
 							oldTabs+"} while("+si0+" < steps.length);"
 						])
 					);
+					
+					tabs = compileHintPart(tabs+"\t",nextStep,body,post);
+					body.push(
+						tabs+"if(result) { //next hint part "+si0
+					);
+					//the rest of the machine will slide in right here. then...:
+					post.unshift(tabs+"} //end hint part "+si0);
+					tabs = tabs + "\t";
 				}
 				//in a loop:
 				//  include right hint's compiled form.

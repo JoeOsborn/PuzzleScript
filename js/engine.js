@@ -2230,7 +2230,7 @@ function dirToBits(dir) {
 var AGAIN_LIMIT = 100;
 function runCompleteStep(inputDir) {
 	var again = 0;
-	var anyResults = processInput(step,false,false,null,false,true);
+	var anyResults = processInput(inputDir,false,false,null,false,true);
 	while(againing && again <= AGAIN_LIMIT) {
 		anyResults = processInput(-1,false,false,null,false,true) || anyResults;
 		//TODO: detect loops with a hash code?

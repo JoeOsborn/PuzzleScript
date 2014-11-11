@@ -5,7 +5,7 @@ var HintCompiler = (function() {
 	
 	var winningRE = /^winning\b/i;
 	var finishedRE = /^finished\b/i;
-	var ellipsesRE = /^\.\.\.\s/;
+	var ellipsesRE = /^\.\.\.(?=\s|\))/;
 	
 	var thenRE = /^then\b/i;
 	var untilRE = /^until\b/i;
@@ -78,7 +78,7 @@ var HintCompiler = (function() {
 
 	var TOKENS = [
 		symbol(winningRE, "winning", "predicate"),
-		symbol(winningRE, "finished", "predicate"),
+		symbol(finishedRE, "finished", "predicate"),
 		symbol(ellipsesRE, "ellipses"),
 		{
 			type:"then",
@@ -486,8 +486,8 @@ var HintCompiler = (function() {
 	var AGAIN_LIMIT = 100;
 
 	function nextStepStmt(tabs) {
-		return tabs+"si++;\n"+
-			tabs+"runCompleteStep(steps[si]);";
+		return tabs+"runCompleteStep(steps[si]);\n"+
+			tabs+"si++;";
 	}
 	
 	function gensym(nom, hint) {
@@ -527,7 +527,6 @@ var HintCompiler = (function() {
 							$si0++;
 							$$nextStep
 						} while($si0 < steps.length);
-						if($si0 >= steps.length) { result = false; }
 						*/
 						var si0 = gensym("si0",step);
 						body.push(
@@ -540,13 +539,13 @@ var HintCompiler = (function() {
 						);
 						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
 						post.unshift(
-							tabs+"\tif(result) {",
-							tabs+"\t\tbreak;",
-							tabs+"\t}",
+							// tabs+"\tif(result) {",
+							// tabs+"\t\tbreak;",
+							// tabs+"\t}",
 							unwindStateStmt(tabs+"\t",si0,sid),
 							nextStepStmt(tabs+"\t"),
-							tabs+"} while("+si0+" < steps.length);",
-							tabs+"if("+si0+" >= steps.length) { result = false; }"
+							tabs+"} while("+si0+" < steps.length);"//,
+							//tabs+"if("+si0+" >= steps.length) { result = false; }"
 						);
 						sid++;
 					} else {
@@ -563,7 +562,7 @@ var HintCompiler = (function() {
 						body.push(
 							tabs+"if(result) {"
 						);
-						if(i < steps.length -1) {
+						if(i < steps.length -1 && steps[i+1].type != "ellipses") {
 							body.push(nextStepStmt("\t"+tabs));
 						}
 						body.push(tabs+"\t//next hint part");
@@ -650,12 +649,13 @@ var HintCompiler = (function() {
 			"\tvar result = false;",
 			nextStepStmt("\t")
 		];
-		var hintFnPost = ["\treturn result;", "}"];
+		var hintFnPost = ["\treturn false;", "}"];
 		var tabs = "\t";
 		tabs = compileHintPart(tabs,hint,hintFnBody,hintFnPost);
+		hintFnBody.push(tabs+"if(si == steps.length) { return result; }");
 		var backups = [];
 		for(var i = 0; i < sid; i++) {
-			backups.push("\tvar backup_"+i+" = new Int32Array(level.n_tiles);");
+			backups.push("\tvar backup_"+i+" = new Int32Array(level.objects.length);");
 		}
 		hintFnBody.unshift()
 		var hintFn = ["function hint_"+pos.line+"(steps) {"].concat(backups).concat(hintFnBody).concat(hintFnPost).join("\n");

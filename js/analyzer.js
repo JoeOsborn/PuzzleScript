@@ -499,9 +499,9 @@ var Analyzer = (function() {
 			//find a (@HINT starting at or after l1 but before l2
 			//find the ) after that @HINT
 			//then parse it
-			var str = editor.getRange({line:l1},{line:l2});
+			var str = editor.getRange({line:l0},{line:l1});
 			var hintStartMatch;
-			var idx = editor.indexFromPos({line:l1});
+			var idx = editor.indexFromPos({line:l0});
 			while(hintStartMatch = str.match(hintStartRE)) {
 				idx += hintStartMatch.index+hintStartMatch[0].length;
 				var range = [editor.posFromIndex(idx), null];

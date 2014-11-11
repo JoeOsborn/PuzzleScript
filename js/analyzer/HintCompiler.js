@@ -104,7 +104,7 @@ var HintCompiler = (function() {
 				} else {
 					steps = [lhs,rhs.parse];
 				}
-				return {parse:{type:"then", metatype:"temporal", value:{steps:steps}}, stream:rhs.stream};
+				return {parse:{type:"then", metatype:"temporal", value:{steps:steps}, range:{start:steps[0].range.start,end:steps[steps.length-1].range.end}}, stream:rhs.stream};
 			},
 			lbp:1
 		},
@@ -137,7 +137,7 @@ var HintCompiler = (function() {
 						throw new Error("Can't put ellipses into an until");
 					}
 				}
-				return {parse:{type:"until", metatype:"temporal", value:{steps:steps}}, stream:rhs.stream};
+				return {parse:{type:"until", metatype:"temporal", value:{steps:steps}, range:{start:steps[0].range.start,end:steps[steps.length-1].range.end}}, stream:rhs.stream};
 			},
 			lbp:2
 		},
@@ -157,7 +157,7 @@ var HintCompiler = (function() {
 				if(parse.parse.type == "ellipses") {
 					throw new Error("Can't put ellipses into a group by themselves");
 				}
-				return {parse:{type:"group", metatype:"group", value:{contents:parse.parse}}, stream:streamPrime};
+				return {parse:{type:"group", metatype:"group", value:{contents:parse.parse}, range:{start:tok.range.start,end:streamPrime.token.range.end}}, stream:streamPrime};
 			},
 			led:noLed,
 			lbp:0
@@ -263,7 +263,11 @@ var HintCompiler = (function() {
 					on:state.objectMasks[onObj],
 					count:count
 				}, range:{start:pos,end:endPos}, length:match[0].length};
-			}
+			},
+			nud:function(tok,stream) {
+				return {parse:tok, stream:stream};
+			},
+			led:noLed
 		},
 		//non-associative n-ary operator? "permute permute x y z permute a b c" is ambiguous.
 		symbol(permuteRE, "permute"),
@@ -514,38 +518,35 @@ var HintCompiler = (function() {
 					if(step.type == "ellipses") {
 						/*
 						var $si0 = si;
+						label:
 						do {
 							$$storeState
+							result = true;
 							
 							REST
 							
-							if(result) {
-								$$clearState
-								break;
-							}
 							unwind to $si0;
 							$si0++;
 							$$nextStep
 						} while($si0 < steps.length);
 						*/
 						var si0 = gensym("si0",step);
+						var mysid = sid;
+						sid++;
 						body.push(
 							tabs+"var "+si0+" = si;",
+							tabs+si0+":",
 							tabs+"do {",
-							storeStateStmt(tabs+"\t",si0,sid),
+							storeStateStmt(tabs+"\t",si0,mysid),
 							//set result to true (it might have been set false on a previous trip through)
 							tabs+"\tresult = true;",
 							tabs+"\t//next hint part"
 						);
 						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
 						post.unshift(
-							// tabs+"\tif(result) {",
-							// tabs+"\t\tbreak;",
-							// tabs+"\t}",
-							unwindStateStmt(tabs+"\t",si0,sid),
+							unwindStateStmt(tabs+"\t",si0,mysid),
 							nextStepStmt(tabs+"\t"),
-							tabs+"} while("+si0+" < steps.length);"//,
-							//tabs+"if("+si0+" >= steps.length) { result = false; }"
+							tabs+"} while("+si0+" < steps.length);"
 						);
 						sid++;
 					} else {
@@ -563,7 +564,7 @@ var HintCompiler = (function() {
 							tabs+"if(result) {"
 						);
 						if(i < steps.length -1 && steps[i+1].type != "ellipses") {
-							body.push(nextStepStmt("\t"+tabs));
+							body.push(nextStepStmt(tabs+"\t"));
 						}
 						body.push(tabs+"\t//next hint part");
 						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
@@ -575,6 +576,73 @@ var HintCompiler = (function() {
 				}
 				break;
 			case "until":
+				/*
+				var $si0 = si;
+				$si0:
+				do {
+
+					$$storeState
+					STEPS[i+1]
+						if(result) {
+							REST
+						}
+						$$unwindState
+
+						STEPS[i]
+							if(!result) {
+								//bail out if STEPS[i] does not hold
+								break;
+							}
+						$$nextStep //always nextStep, even if STEPS[i] is an arrow.
+						//a b a b a b c --> (a then b) until c. the "a then b" moves the cursor to the b, then it gets moved again.
+				} while($si0 < steps.length);
+				*/
+				var steps = hint.value.steps;
+				for(var i = 0; i < steps.length-1; i++) {
+					var step = steps[i];
+					var nextStep = steps[i+1];
+					var si0 = gensym("si0",step);
+					var mysid = sid;
+					sid++;
+					body.push(
+						tabs+"var "+si0+" = si;",
+						tabs+si0+":",
+						tabs+"do {",
+						storeStateStmt(tabs+"\t",si0,mysid),
+						//set result to true (it might have been set false on a previous trip through)
+						tabs+"\tresult = true;",
+						tabs+"\t//until RHS "+si0
+					);
+					var oldTabs = tabs;
+					tabs = compileHintPart(tabs+"\t",nextStep,body,post);
+					body.push(
+						tabs+"if(result) { //resume "+si0
+					);
+					tabs = tabs + "\t";
+					//the rest of the machine will slide in right here. then...:
+					var preBody = [oldTabs+"\t//until LHS "+si0], prePost = [];
+					var lhsTabs = compileHintPart(oldTabs+"\t",step,preBody,prePost);
+					preBody.push(
+						lhsTabs+"if(result) {",
+						nextStepStmt(lhsTabs+"\t"),
+						lhsTabs+"\tcontinue "+si0+";",
+						lhsTabs+"} else {",
+						lhsTabs+"\tbreak "+si0+";",
+						lhsTabs+"}"
+					);
+					//FIXME: this whole "end hint part and LHS" chunk of si_0_0 is getting inserted BEFORE the end hint part of the deeper hint si_0_10! 
+					post.unshift.apply(post, 
+						[
+							oldTabs+"\t} // end hint part "+si0,
+							unwindStateStmt(oldTabs+"\t",si0,mysid)
+						].
+						concat(preBody).concat(prePost).
+						concat([
+							oldTabs+"\tif(!result) { break "+si0+"; }",
+							oldTabs+"} while("+si0+" < steps.length);"
+						])
+					);
+				}
 				//in a loop:
 				//  include right hint's compiled form.
 				//    if result==true, succeed & break
@@ -658,9 +726,14 @@ var HintCompiler = (function() {
 			backups.push("\tvar backup_"+i+" = new Int32Array(level.objects.length);");
 		}
 		hintFnBody.unshift()
-		var hintFn = ["function hint_"+pos.line+"(steps) {"].concat(backups).concat(hintFnBody).concat(hintFnPost).join("\n");
+		var hintFn = ["function hint_"+pos.line+"(steps) { console.log('hint');"].concat(backups).concat(hintFnBody).concat(hintFnPost).join("\n");
 		//TODO: try/catch/logError
-		global.eval(hintFn+"\n");
+		try {
+			global.eval(hintFn+"\n");
+		} catch(e) {
+			console.log(hintFn);
+			throw e;
+		}
 		result.hint = {
 			match:global["hint_"+pos.line]
 		};

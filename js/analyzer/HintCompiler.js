@@ -74,7 +74,28 @@ var HintCompiler = (function() {
 		throw new Error(tok.type+" has no left denotation");
 	}
 
-	//start with: ellipses, then, direction.
+	//direction, then, ellipses, until, not, or
+	
+	function isTemporal(parse) {
+		//catch then/until/permute
+		if(parse.metatype == "temporal") { return true; }
+		switch(parse.type) {
+			//catch ands & ors with any temporal members
+			case "and":
+			case "or":
+				return anyIsTemporal(parse.value.options);
+			case "not":
+			case "group":
+				return isTemporal(parse.value.contents);
+		}
+		return false;
+	}
+	function anyIsTemporal(parses) {
+		for(var i = 0; i < parses.length; i++) {
+			if(isTemporal(parses[i])) { return true; }
+		}
+		return false;
+	}
 
 	var TOKENS = [
 		symbol(winningRE, "winning", "predicate"),
@@ -142,9 +163,26 @@ var HintCompiler = (function() {
 			lbp:2
 		},
 		//TODO: AND and OR; similar to then or until (including n-ary reassociation). note: AND can only have states on either side; OR comes in "state OR state => state" and "state OR arrow => arrow" flavors and the two have distinct types and metatypes (predicate and temporal respectively). NOT also comes in predicate and temporal flavors. none of these can have an ellipses as an argument.
-		symbol(andRE, "and"),
-		symbol(orRE, "or"),
-		symbol(notRE, "not"),
+		symbol(andRE, "and"), //lbp:3
+		symbol(orRE, "or"), //lbp:4
+		{
+			type:"not",
+			match:matchSymbol(notRE, "not"),
+			nud:function(tok,stream) {
+				var parse = parseHint(stream,5);
+				if(parse.parse.type == "ellipses") {
+					throw new Error("Can't put ellipses into a not by itself");
+				}
+				return {parse:{
+					type:"not", 
+					metatype:isTemporal(parse.parse) ? "temporal" : "predicate", 
+					value:{contents:parse.parse}, 
+					range:{start:tok.range.start,end:parse.stream.token.range.end}
+				}, stream:parse.stream};
+			},
+			led:noLed,
+			lbp:5
+		},
 		{
 			type:"lparen",
 			match:matchSymbol(lparenRE, "lparen"),
@@ -537,12 +575,13 @@ var HintCompiler = (function() {
 							tabs+"var "+si0+" = si;",
 							tabs+si0+":",
 							tabs+"do {",
+							//TODO: don't store/unwind if REST is non-temporal
 							storeStateStmt(tabs+"\t",si0,mysid),
 							//set result to true (it might have been set false on a previous trip through)
 							tabs+"\tresult = true;",
 							tabs+"\t//next hint part"
 						);
-						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
+						//the rest of the machine will slide in right here. then...:
 						post.unshift(
 							unwindStateStmt(tabs+"\t",si0,mysid),
 							nextStepStmt(tabs+"\t"),
@@ -567,7 +606,7 @@ var HintCompiler = (function() {
 							body.push(nextStepStmt(tabs+"\t"));
 						}
 						body.push(tabs+"\t//next hint part");
-						//the rest of the machine will slide in right here (TODO: Will it?!). then...:
+						//the rest of the machine will slide in right here. then...:
 						post.unshift(
 							tabs+"}"
 						);
@@ -608,6 +647,7 @@ var HintCompiler = (function() {
 						tabs+"var "+si0+" = si;",
 						tabs+si0+":",
 						tabs+"do {",
+						//TODO: don't store/unwind if STEPS[i+1] is non-temporal and REST is non-temporal
 						storeStateStmt(tabs+"\t",si0,mysid),
 						//set result to true (it might have been set false on a previous trip through)
 						tabs+"\tresult = true;",
@@ -626,7 +666,6 @@ var HintCompiler = (function() {
 					);
 					post.unshift.apply(post, 
 						preBody.concat(prePost).concat([
-							// oldTabs+"\t} // end hint part "+si0,
 							unwindStateStmt(oldTabs+"\t",si0,mysid)
 						]).
 						concat([
@@ -656,22 +695,9 @@ var HintCompiler = (function() {
 				post.unshift(tabs+"//end group");
 				tabs = compileHintPart(tabs, hint.value.contents, body, post);
 				break;
-			case "ellipses": //WARNING: may have to handle this in until and in then, since it may only appear on either side of an arrow, and then only by itself.
-				//if there is no more formula left, set si=steps.length and succeed
-				//store the state, si0=si
-				//call remainder of formula as a function (this may be the hard part? where does it come from? etc...)
-				//if that succeeds: succeed; otherwise: restore the state, si=si0, and...
-				//while si < steps.length
-				//  do a step (si++)
-				//  store the state, si0=si
-				//  call remainder of formula as a function
-				//  if that succeeds: succeed & break
-				//  if that fails: restore the state, si=si0
-				//fail
+			case "ellipses":
 				throw new Error("Ellipses not handled by an arrow.");
 				break;
-			//TODO: and/or/not with arrows (then or until, written below as ->) in one spot or the other might consume inputs. that needs to be unwound after evaluating the sides...
-			//"((a -> b) and (a -> (not c -> d)) or (d -> e -> f))" --- could consume either 2 or 3 inputs. only works semantically if it consumes NO inputs!
 			case "direction":
 				//succeed if checkfn body succeeds
 				switch(hint.value.direction) {
@@ -698,6 +724,45 @@ var HintCompiler = (function() {
 			case "finished":
 				body.push(tabs+"result = (si == steps.length);");
 				break;
+			case "not":
+				if(hint.metatype == "temporal") {
+					/*
+					store state
+					BODY
+					result = !result;
+					unwind
+					REST
+					*/
+					// var si0 = gensym("si0",hint.value.contents);
+					// var mysid = sid;
+					// sid++;
+					body.push(
+						tabs+"//begin NOT"
+						// tabs+"var "+si0+" = si;",
+						// storeStateStmt(tabs,si0,mysid)
+					);
+					var preBody = [], prePost = [];
+					var contentTabs = compileHintPart(tabs, hint.value.contents, preBody, prePost);
+					body.push.apply(body,
+						preBody.concat(prePost).
+						concat([
+							// unwindStateStmt(tabs,si0,mysid),
+							tabs+"result = !result;",
+							tabs+"//end NOT"
+						])
+					);
+					//rest of the machine goes here
+					
+				//not a
+				} else {
+					/*
+						BODY
+							result = !result;
+						REST
+					*/
+					tabs = compileHintPart(tabs, hint.value.contents, body, post);
+					body.push(tabs+"result = !result;");
+				}
 			default:
 				logError("Can't handle this kind of hint yet:"+JSON.stringify(hint));
 				break;

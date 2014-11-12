@@ -11,7 +11,7 @@ var HintCompiler = (function() {
 	var untilRE = /^until\b/i;
 	var andRE = /^and\b/i;
 	var orRE = /^or\b/i;
-	var notRE = /^not\b/i;
+	var notRE = /^not(\?|\b)?/i;
 	var lparenRE = /^\(/;
 	var rparenRE = /^\)/;
 
@@ -167,7 +167,13 @@ var HintCompiler = (function() {
 		symbol(orRE, "or"), //lbp:4
 		{
 			type:"not",
-			match:matchSymbol(notRE, "not"),
+			match:function(str,pos) {
+				var match = notRE.exec(str);
+				if(!match) { return null; }
+				if(match[1] != "" && match[1] != "?") { return null; }
+				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
+				return {type:"not", metatype:"predicate", value:{useLookahead:match[1] == "?"}, range:{start:pos,end:endPos}, length:match[0].length};
+			},
 			nud:function(tok,stream) {
 				var parse = parseHint(stream,5);
 				if(parse.parse.type == "ellipses") {
@@ -176,7 +182,7 @@ var HintCompiler = (function() {
 				return {parse:{
 					type:"not", 
 					metatype:isTemporal(parse.parse) ? "temporal" : "predicate", 
-					value:{contents:parse.parse}, 
+					value:{contents:parse.parse, useLookahead:tok.value.useLookahead}, 
 					range:{start:tok.range.start,end:parse.stream.token.range.end}
 				}, stream:parse.stream};
 			},
@@ -733,20 +739,24 @@ var HintCompiler = (function() {
 					unwind
 					REST
 					*/
-					// var si0 = gensym("si0",hint.value.contents);
-					// var mysid = sid;
-					// sid++;
+					var si0, mysid;
+					var lookahead = hint.value.useLookahead;
+					if(lookahead) {
+						si0 = gensym("si0",hint.value.contents); //lookahead
+						mysid = sid; //lookahead
+						sid++; //lookahead
+					}
 					body.push(
-						tabs+"//begin NOT"
-						// tabs+"var "+si0+" = si;",
-						// storeStateStmt(tabs,si0,mysid)
+						tabs+"//begin NOT",
+						lookahead ? tabs+"var "+si0+" = si;" : "", //lookahead
+						lookahead ? storeStateStmt(tabs,si0,mysid) : "" //lookahead
 					);
 					var preBody = [], prePost = [];
 					var contentTabs = compileHintPart(tabs, hint.value.contents, preBody, prePost);
 					body.push.apply(body,
 						preBody.concat(prePost).
 						concat([
-							// unwindStateStmt(tabs,si0,mysid),
+							lookahead ? unwindStateStmt(tabs,si0,mysid) : "", //lookahead
 							tabs+"result = !result;",
 							tabs+"//end NOT"
 						])

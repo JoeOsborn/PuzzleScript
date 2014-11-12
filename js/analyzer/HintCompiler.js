@@ -162,15 +162,90 @@ var HintCompiler = (function() {
 			},
 			lbp:2
 		},
-		//TODO: AND and OR; similar to then or until (including n-ary reassociation). note: AND can only have states on either side; OR comes in "state OR state => state" and "state OR arrow => arrow" flavors and the two have distinct types and metatypes (predicate and temporal respectively). NOT also comes in predicate and temporal flavors. none of these can have an ellipses as an argument.
-		symbol(andRE, "and"), //lbp:3
-		symbol(orRE, "or"), //lbp:4
+		{
+			type:"and",
+			match:matchSymbol(andRE, "and"),
+			nud:noNud,
+			led:function(tok,stream,lhs) {
+				//left-associative n-ary operator
+				var rhs = parseHint(stream, 3);
+				var conjuncts;
+				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
+				//Groups will not be distributed through. This is important for and's semantics. Groups
+				//can be considered as "inner machines".
+				//merge and(and(A,B), and(C,D)) into and(A,B,C,D)
+				if(lhs.type == "and" && rhs.parse.type == "and") {
+					conjuncts = lhs.value.conjuncts.concat(rhs.parse.value.conjuncts);
+				//merge and(and(A,B), C) into and(A,B,C)
+				} else if(lhs.type == "and") {
+					conjuncts = lhs.value.conjuncts.concat([rhs.parse]);
+				//merge and(A, and(B,C)) into and(A,B,C)
+				} else if(rhs.parse.type == "and") {
+					conjuncts = [lhs].concat(rhs.parse.value.conjuncts);
+				//leave and(A,B) as-is.
+				} else {
+					conjuncts = [lhs,rhs.parse];
+				}
+				for(var ci = 0; ci < conjuncts.length; ci++) {
+					if(conjuncts[ci].type == "ellipses") {
+						throw new Error("Can't put ellipses into an and");
+					}
+				}
+				return {parse:{
+					type:"and", 
+					metatype:anyIsTemporal(conjuncts) ? "temporal" : "predicate", value:{
+						conjuncts:conjuncts
+					}, 
+					range:{start:conjuncts[0].range.start,end:conjuncts[conjuncts.length-1].range.end}
+				}, stream:rhs.stream};
+			},
+			lbp:3
+		},
+		{
+			type:"or",
+			match:matchSymbol(orRE, "or"),
+			nud:noNud,
+			led:function(tok,stream,lhs) {
+				//left-associative n-ary operator
+				var rhs = parseHint(stream, 4);
+				var disjuncts;
+				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
+				//Groups will not be distributed through. This is important for and's semantics. Groups
+				//can be considered as "inner machines".
+				//merge or(or(A,B), or(C,D)) into or(A,B,C,D)
+				if(lhs.type == "or" && rhs.parse.type == "or") {
+					disjuncts = lhs.value.disjuncts.concat(rhs.parse.value.disjuncts);
+				//merge or(or(A,B), C) into or(A,B,C)
+				} else if(lhs.type == "or") {
+					disjuncts = lhs.value.disjuncts.concat([rhs.parse]);
+				//merge or(A, or(B,C)) into or(A,B,C)
+				} else if(rhs.parse.type == "or") {
+					disjuncts = [lhs].concat(rhs.parse.value.disjuncts);
+				//leave or(A,B) as-is.
+				} else {
+					disjuncts = [lhs,rhs.parse];
+				}
+				for(var di = 0; di < disjuncts.length; di++) {
+					if(disjuncts[di].type == "ellipses") {
+						throw new Error("Can't put ellipses into an or");
+					}
+				}
+				return {parse:{
+					type:"or", 
+					metatype:anyIsTemporal(disjuncts) ? "temporal" : "predicate", value:{
+						disjuncts:disjuncts
+					}, 
+					range:{start:disjuncts[0].range.start,end:disjuncts[disjuncts.length-1].range.end}
+				}, stream:rhs.stream};
+			},
+			lbp:4
+		},
 		{
 			type:"not",
 			match:function(str,pos) {
 				var match = notRE.exec(str);
 				if(!match) { return null; }
-				if(match[1] != "" && match[1] != "?") { return null; }
+				if(match[1] && match[1] != "" && match[1] != "?") { return null; }
 				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
 				return {type:"not", metatype:"predicate", value:{useLookahead:match[1] == "?"}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
@@ -352,7 +427,7 @@ var HintCompiler = (function() {
 			},
 			led:noLed
 		},
-		stringValue(identifierRE, "identifier"),
+		//stringValue(identifierRE, "identifier"),
 		{
 			type:"pattern2D",
 			match:function(str, pos) {
@@ -730,6 +805,37 @@ var HintCompiler = (function() {
 			case "finished":
 				body.push(tabs+"result = (si == steps.length);");
 				break;
+			case "and":
+				if(hint.metatype == "temporal") {
+					/*
+					si0=si
+					store
+					c_1
+						target = si
+						if(result) {
+							rewind
+							c_2
+								target = max(target,si)
+								if(result) {
+									...
+									c_i
+										target = max(target,si)
+										if(result) {
+											while(si < target) {
+												$$nextStep
+											}
+											REST
+										}
+								}
+						}
+					*/
+				} else {
+					/*easy peasy, just the && of everything*/
+				}
+				break;
+			case "or":
+				throw new Error("Or not supported yet");
+				break;
 			case "not":
 				if(hint.metatype == "temporal") {
 					/*
@@ -773,6 +879,7 @@ var HintCompiler = (function() {
 					tabs = compileHintPart(tabs, hint.value.contents, body, post);
 					body.push(tabs+"result = !result;");
 				}
+				break;
 			default:
 				logError("Can't handle this kind of hint yet:"+JSON.stringify(hint));
 				break;

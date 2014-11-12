@@ -1,3 +1,5 @@
+//TODO:consider a functional rephrasing where each node calls a function to check the remainder of the sequence. might be simpler, inliner might be able to deal with it.
+
 var global = this;
 
 var HintCompiler = (function() {
@@ -629,6 +631,10 @@ var HintCompiler = (function() {
 	function compileHintPart(tabs,hint,body,post) {
 		switch(hint.type) {
 			//NOTE: anywhere "do a step" or "runCompleteStep(step)" appears below, that's a step plus again loops.
+			case "literal":
+				body.push.apply(body,hint.value.body.map(function(str) { return tabs+str; }));
+				post.unshift.apply(post,hint.value.post.map(function(str) { return tabs+str; }));
+				return tabs+hint.value.tabs;
 			case "then":
 				//include left hint's compiled form. if result == false or si == steps.length, fail; if result == true, do a step(si++), then insert the right hint (it might change result to false)
 				var steps = hint.value.steps;
@@ -681,7 +687,7 @@ var HintCompiler = (function() {
 						*/
 						tabs = compileHintPart(tabs,steps[i],body,post);
 						body.push(
-							tabs+"if(result) {"
+							tabs+"if("+(negations % 2 == 0 ? "" : "!")+"result) {"
 						);
 						if(i < steps.length -1 && steps[i+1].type != "ellipses") {
 							body.push(nextStepStmt(tabs+"\t"));
@@ -696,73 +702,146 @@ var HintCompiler = (function() {
 				}
 				break;
 			case "until":
-				/*
-				var $si0 = si;
-				$si0:
+				/* X until Y until Z
+				(Y then (Y until Z)) or (X then (Y then Z)) or (X then (Y then Y then Z)) or ... (X then X then (Y then Z)) or...
+				
+				on finding a successful X
+					move forward until reaching Y
+						on finding a successful Y
+							move forward until reaching Z
+								on finding a successful Z
+									succeed
+						else fail (find the next X)
+					else fail
+				
+					else Y is false so retry up one
+				
+				(a or (a then b)) until c --> [a b c] should pass.
+				
+				var si0, si00
 				do {
-
-					$$storeState
-					STEPS[i+1]
-						if(result) {
+					si0 = si
+					$$store
+					(si == si0 || LHS)
+						RHS
 							REST
-						}
-						$$unwindState
-
-						STEPS[i]
-							if(!result) {
-								//bail out if STEPS[i] does not hold
-								break;
-							}
-						$$nextStep //always nextStep, even if STEPS[i] is an arrow.
-						//a b a b a b c --> (a then b) until c. the "a then b" moves the cursor to the b, then it gets moved again.
-				} while($si0 < steps.length);
+					$$rewind
+					$$next
+				} while(si0 < steps.length)
+								
+				a until b then c
+				[a ab ab c]
+				
+				[a b X] -- attempt 1
+				[a a b c] -- attempt 2
+				
+				it's cleanest if we take the first match only
+				
+				(a until ((c then d) OR b)) then d
+				[a bc d]
+				
+				NOPE, got to take all the matches. :x
 				*/
-				var steps = hint.value.steps;
+				
 				for(var i = 0; i < steps.length-1; i++) {
-					var step = steps[i];
-					var nextStep = steps[i+1];
-					var si0 = gensym("si0",step);
+					var lhs = steps[i];
+					var rhs = steps[i+1];
+					var si0 = gensym("si0",lhs);
+					var si00 = gensym("si00",lhs);
 					var mysid = sid;
 					sid++;
 					body.push(
+						tabs+"var "+si00+" = si;",
 						tabs+"var "+si0+" = si;",
-						tabs+si0+":",
 						tabs+"do {",
-						//TODO: don't store/unwind if STEPS[i+1] is non-temporal and REST is non-temporal
-						storeStateStmt(tabs+"\t",si0,mysid),
-						//set result to true (it might have been set false on a previous trip through)
-						tabs+"\tresult = true;",
-						tabs+"\t//until RHS "+si0
+						tabs+si0+" = si;",
+						storeStateStmt(tabs,si0,mysid)
 					);
-					var oldTabs = tabs;
-					var preBody = [oldTabs+"\t//until LHS "+si0], prePost = [];
-					var lhsTabs = compileHintPart(oldTabs+"\t",step,preBody,prePost);
-					preBody.push(
-						lhsTabs+"if(result) {",
-						nextStepStmt(lhsTabs+"\t"),
-						lhsTabs+"\tcontinue "+si0+";",
-						lhsTabs+"} else {",
-						lhsTabs+"\tbreak "+si0+";",
-						lhsTabs+"}"
+					post.unshift(
+						unwindStateStmt(tabs+"\t",si0,mysid),
+						nextStepStmt(tabs+"\t"),
+						tabs+"} while("+si0+" < steps.length);"
 					);
-					post.unshift.apply(post, 
-						preBody.concat(prePost).concat([
-							unwindStateStmt(oldTabs+"\t",si0,mysid)
-						]).
-						concat([
-							oldTabs+"\tif(!result) { break "+si0+"; }",
-							oldTabs+"} while("+si0+" < steps.length);"
-						])
-					);
-					
-					tabs = compileHintPart(tabs+"\t",nextStep,body,post);
-					body.push(
-						tabs+"if(result) { //next hint part "+si0
-					);
-					//the rest of the machine will slide in right here. then...:
-					post.unshift(tabs+"} //end hint part "+si0);
 					tabs = tabs + "\t";
+					tabs = compileHintPart(tabs, {type:"or", metatype:"temporal", value:{disjuncts:[
+						{type:"literal",metatype:"predicate",value:{body:["si0==si00"],post:[],tabs:""}},
+						lhs
+					]}}, body, post);
+					//slide in the RHS
+					tabs = compileHintPart(tabs, rhs, body, post);
+					//rest of machine slides in here
 				}
+				//
+				//
+				//
+				// /*
+				// var $si0 = si;
+				// $si0:
+				// do {
+				//
+				// 	$$storeState
+				// 	STEPS[i+1]
+				// 		if(result) {
+				// 			REST
+				// 		}
+				// 		$$unwindState
+				//
+				// 		STEPS[i]
+				// 			if(result) {
+				// 				//bail out if STEPS[i] does not hold
+				// 				break;
+				// 			}
+				// 		$$nextStep //always nextStep, even if STEPS[i] is an arrow.
+				// 	 	//a b a b a b c --> (a then b) until c. the "a then b" moves the cursor to the b, then it gets moved again.
+				// } while($si0 < steps.length);
+				// */
+				// var steps = hint.value.steps;
+				// for(var i = 0; i < steps.length-1; i++) {
+				// 	var step = steps[i];
+				// 	var nextStep = steps[i+1];
+				// 	var si0 = gensym("si0",step);
+				// 	var mysid = sid;
+				// 	sid++;
+				// 	body.push(
+				// 		tabs+"var "+si0+" = si;",
+				// 		tabs+si0+":",
+				// 		tabs+"do {",
+				// 		//TODO: don't store/unwind if STEPS[i+1] is non-temporal and REST is non-temporal
+				// 		storeStateStmt(tabs+"\t",si0,mysid),
+				// 		//set result to true (it might have been set false on a previous trip through)
+				// 		tabs+"\tresult = true;",
+				// 		tabs+"\t//until RHS "+si0
+				// 	);
+				// 	var oldTabs = tabs;
+				// 	var preBody = [oldTabs+"\t//until LHS "+si0], prePost = [];
+				// 	var lhsTabs = compileHintPart(oldTabs+"\t",step,preBody,prePost);
+				// 	//FIXME: this is wrong. consider "(a OR (a then b)) until c" and "[a,b,c]".
+				// 	preBody.push(
+				// 		lhsTabs+"if(result) {",
+				// 		nextStepStmt(lhsTabs+"\t"),
+				// 		lhsTabs+"\tcontinue "+si0+";",
+				// 		lhsTabs+"} else {",
+				// 		lhsTabs+"\tbreak "+si0+";",
+				// 		lhsTabs+"}"
+				// 	);
+				// 	post.unshift.apply(post,
+				// 		preBody.concat(prePost).concat([
+				// 			unwindStateStmt(oldTabs+"\t",si0,mysid)
+				// 		]).
+				// 		concat([
+				// 			oldTabs+"\tif(!result) { break "+si0+"; }",
+				// 			oldTabs+"} while("+si0+" < steps.length);"
+				// 		])
+				// 	);
+				//
+				// 	tabs = compileHintPart(tabs+"\t",nextStep,body,post);
+				// 	body.push(
+				// 		tabs+"if(result) { //next hint part "+si0
+				// 	);
+				// 	//the rest of the machine will slide in right here. then...:
+				// 	post.unshift(tabs+"} //end hint part "+si0);
+				// 	tabs = tabs + "\t";
+				// }
 				//in a loop:
 				//  include right hint's compiled form.
 				//    if result==true, succeed & break
@@ -817,20 +896,6 @@ var HintCompiler = (function() {
 				}
 				for(var i = 0; i < conjuncts.length; i++) {
 					if(isTemporal(conjuncts[i])) {
-						if(i < conjuncts.length-1) {
-							var mysid = sid;
-							sid++;
-							body.push(
-								storeStateStmt(tabs,si0,mysid)
-							);
-						}
-						tabs = compileHintPart(tabs, conjuncts[i], body, post);
-						body.push(
-							tabs+targetTimeVar+" = (si > "+targetTimeVar+") ? si : "+targetTimeVar+";"
-						);
-						if(i < conjuncts.length-1) {
-							body.push(unwindStateStmt(tabs,si0,mysid));
-						}
 						/*
 						si0=si
 						store
@@ -853,6 +918,20 @@ var HintCompiler = (function() {
 									}
 							}
 						*/
+						if(i < conjuncts.length-1) {
+							var mysid = sid;
+							sid++;
+							body.push(
+								storeStateStmt(tabs,si0,mysid)
+							);
+						}
+						tabs = compileHintPart(tabs, conjuncts[i], body, post);
+						body.push(
+							tabs+targetTimeVar+" = (si > "+targetTimeVar+") ? si : "+targetTimeVar+";"
+						);
+						if(i < conjuncts.length-1) {
+							body.push(unwindStateStmt(tabs,si0,mysid));
+						}
 					} else {
 						//$$conjuncts[i]
 						//if(result) {
@@ -874,51 +953,222 @@ var HintCompiler = (function() {
 				//Rest of the machine slides in here (a big open conditional)
 				break;
 			case "or":
+				/*
+				$$store
+				c_1
+					REST
+			  if(!result) {
+			  	$$rewind
+				}
+				c_2
+					REST
+				...
+				*/
+				problem: REST needs to be inserted many times. how to deal with that?
+				
 				throw new Error("Or not supported yet");
 				break;
 			case "not":
-				if(hint.metatype == "temporal") {
-					/*
-					store state
-					BODY
-					result = !result;
-					unwind
-					REST
-					*/
-					var si0, mysid;
-					var lookahead = hint.value.useLookahead;
-					if(lookahead) {
-						si0 = gensym("si0",hint.value.contents); //lookahead
-						mysid = sid; //lookahead
-						sid++; //lookahead
-					}
-					body.push(
-						tabs+"//begin NOT",
-						lookahead ? tabs+"var "+si0+" = si;" : "", //lookahead
-						lookahead ? storeStateStmt(tabs,si0,mysid) : "" //lookahead
-					);
-					var preBody = [], prePost = [];
-					var contentTabs = compileHintPart(tabs, hint.value.contents, preBody, prePost);
-					body.push.apply(body,
-						preBody.concat(prePost).
-						concat([
-							lookahead ? unwindStateStmt(tabs,si0,mysid) : "", //lookahead
-							tabs+"result = !result;",
-							tabs+"//end NOT"
-						])
-					);
-					//rest of the machine goes here
-					
-				//not a
-				} else {
-					/*
-						BODY
-							result = !result;
-						REST
-					*/
-					tabs = compileHintPart(tabs, hint.value.contents, body, post);
-					body.push(tabs+"result = !result;");
+				if(hint.value.useLookahead) {
+					push store state to body
 				}
+				switch(hint.value.contents.type) {
+					case "not":
+						tabs = compileHintPart(tabs, hint.value.contents.value.contents, body, post);
+						break;
+					case "group":
+						tabs = compileHintPart(tabs, {
+							type:"not",
+							metatype:hint.metatype,
+							value:{
+								contents:hint.value.contents.value.contents,
+								useLookahead:false
+							},
+							range:hint.range
+						})
+						break;
+					case "and":
+						tabs = compileHintPart(tabs, {
+							type:"or",
+							metatype:hint.value.contents.metatype,
+							value:{
+								disjuncts:hint.value.contents.conjuncts.map(function(d) {
+									return {
+										type:"not", 
+										metatype:anyIsTemporal(hint.value.contents.conjuncts) ? "temporal" : "predicate",
+										value:{contents:d, useLookahead:false},
+										range:d.range
+									};
+								})
+							}
+							range:hint.range
+						}, body, post);
+						break;
+					case "or":
+						tabs = compileHintPart(tabs, {
+							type:"and",
+							metatype:hint.value.contents.metatype,
+							value:{
+								conjuncts:hint.value.contents.disjuncts.map(function(d) {
+									return {
+										type:"not", 
+										metatype:anyIsTemporal(hint.value.contents.disjuncts) ? "temporal" : "predicate",
+										value:{contents:d, useLookahead:false},
+										range:d.range
+									};
+								})
+							}
+							range:hint.range
+						}, body, post);
+						break;
+					case "then":
+						//not (A then B) -- (not A) or (A then not B)
+						// distribute not. a then of length K goes into a K-disjunction of thens:
+						var disjuncts = [];
+						var steps = hint.value.contents.value.steps;
+						var thisDisjunct, theseSteps;
+						for(var i = 0; i < steps.length; i++) {
+							thisDisjunct = {
+								type:"then",
+								metatype:"temporal",
+								value:{steps:theseSteps},
+								range:steps[i].range
+							}
+							for(var j = 0; j < i; j++) {
+								//j then...
+								theseSteps.push(steps[j]);
+							}
+							//not i
+							theseSteps.push({
+								type:"not",
+								metatype:isTemporal(steps[i]) ? "temporal" : "predicate",
+								value:{contents:steps[i]}
+								range:steps[i].range
+							})
+							disjuncts.push(thisDisjunct);
+						}
+						tabs = compileHintPart(tabs, {
+							type:"or",
+							metatype:"temporal", //definitely temporal, since (nearly) each disjunct is a "then"
+							value:{
+								disjuncts:disjuncts
+							}
+							range:hint.range
+						}, body, post);
+						break;
+					case "until":
+						//handle until specially:
+						/*
+						for steps lhs=i, rhs=i+1
+						loop:
+						do {
+							not rhs
+								not lhs
+									REST
+								$$nextStep
+								continue loop;
+							break loop;
+						} while(si < steps.length);
+						*/
+						var steps = hint.value.contents.value.steps;
+						for(var i = 0; i < steps.length-1; i++) {
+							var loopLabel = gensym("not_until",hint);
+							body.push(tabs+loopLabel+":");
+							body.push(tabs+"do {");
+							post.unshift(
+								tabs+"\tbreak "+loopLabel+";",
+								tabs+"while(si < steps.length);"
+							)
+							tabs = compileHintPart(tabs, {
+								type:"not",
+								metatype:isTemporal(rhs) ? "temporal" : "predicate",
+								value:{contents:rhs},
+								range:rhs.range
+							}, body, post);
+							post.unshift(
+								nextStepStmt(tabs),
+								tabs+"\tcontinue "+loopLabel+";",
+							)
+							tabs = compileHintPart(tabs, {
+								type:"not",
+								metatype:isTemporal(lhs) ? "temporal" : "predicate",
+								value:{contents:lhs},
+								range:lhs.range
+							}, body, post);
+							//rest slides in here
+						}
+						break;
+					default:
+						if(isTemporal(hint.value.contents)) {
+							throw new Error("Uh oh, doing a poorly-founded negation");
+						}
+						tabs = compileHintPart(tabs, hint.value.contents, body, post);
+						body.push(tabs+"result = !result;");
+						break;
+				}
+				if(hint.value.useLookahead) {
+					push unwind state to body
+				}
+				
+				// if(hint.metatype == "temporal") {
+				// 	/*
+				// 	store state?
+				// 	loop: do{
+				// 		BODY
+				// 	while(false); ///acts as a "goto fail" to support NOTs of loopy things
+				// 	result = !result;
+				// 	unwind?
+				// 	REST
+				//
+				// 	Semantics: NOT always takes the shortest option? No, that sucks....
+				//
+				// 	(not (... then a)) then b
+				// 	"not-a-sequence-ending-with-a followed by a b"
+				// 	[a c a c b]
+				// 	[a c X] -- attempt 1
+				// 	[a c a c B}] -- attempt 2
+				//
+				// 	this means the "break" trick can't be used since the inner nondeterminacy needs to do its loopy thing. I need to put an "} else { REST " on every "if (result) {...}" check within the scope of the NOT...
+				// 	*/
+				// 	var si0, mysid;
+				// 	var lookahead = hint.value.useLookahead;
+				// 	if(lookahead) {
+				// 		si0 = gensym("si0",hint.value.contents); //lookahead
+				// 		mysid = sid; //lookahead
+				// 		sid++; //lookahead
+				// 	}
+				// 	body.push(
+				// 		tabs+"//begin NOT",
+				// 		lookahead ? tabs+"var "+si0+" = si;" : "", //lookahead
+				// 		lookahead ? storeStateStmt(tabs,si0,mysid) : "" //lookahead
+				// 	);
+				// 	var preBody = [], prePost = [];
+				// 	var contentTabs = compileHintPart(tabs, hint.value.contents, preBody, prePost);
+				// 	body.push.apply(body,
+				// 		[
+				// 		  tabs+si0+"_not:",
+				// 		  tabs+"do {"
+				// 		].
+				// 		concat(preBody).concat([contentTabs+"break "+si0+"_not;"]).concat(prePost).
+				// 		concat([
+				// 			tabs+"while(false);",
+				// 			lookahead ? unwindStateStmt(tabs,si0,mysid) : "", //lookahead
+				// 			tabs+"result = !result;",
+				// 			tabs+"//end NOT"
+				// 		])
+				// 	);
+				// 	//rest of the machine goes here
+				//
+				// //not a
+				// } else {
+				// 	/*
+				// 		BODY
+				// 			result = !result;
+				// 		REST
+				// 	*/
+				// 	tabs = compileHintPart(tabs, hint.value.contents, body, post);
+				// 	body.push(tabs+"result = !result;");
+				// }
 				break;
 			default:
 				logError("Can't handle this kind of hint yet:"+JSON.stringify(hint));
@@ -942,7 +1192,7 @@ var HintCompiler = (function() {
 		var hintFnPost = ["\treturn false;", "}"];
 		var tabs = "\t";
 		tabs = compileHintPart(tabs,hint,hintFnBody,hintFnPost);
-		hintFnBody.push(tabs+"if(si == steps.length) { return result; }");
+		hintFnBody.push(tabs+"if(result && si == steps.length) { return result; }");
 		var backups = [];
 		for(var i = 0; i < sid; i++) {
 			backups.push("\tvar backup_"+i+" = new Int32Array(level.objects.length);");

@@ -806,32 +806,72 @@ var HintCompiler = (function() {
 				body.push(tabs+"result = (si == steps.length);");
 				break;
 			case "and":
+				var conjuncts = hint.value.conjuncts;
+				var targetTimeVar = "target_"+hint.range.start.line+"_"+hint.range.start.ch;
+				var si0 = gensym("si0_cjn",hint);
 				if(hint.metatype == "temporal") {
-					/*
-					si0=si
-					store
-					c_1
-						target = si
-						if(result) {
-							rewind
-							c_2
-								target = max(target,si)
-								if(result) {
-									...
-									c_i
-										target = max(target,si)
-										if(result) {
-											while(si < target) {
-												$$nextStep
-											}
-											REST
-										}
-								}
-						}
-					*/
-				} else {
-					/*easy peasy, just the && of everything*/
+					body.push(
+						tabs+"var "+targetTimeVar+" = si;",
+						tabs+"var "+si0+" = si;"
+					);
 				}
+				for(var i = 0; i < conjuncts.length; i++) {
+					if(isTemporal(conjuncts[i])) {
+						if(i < conjuncts.length-1) {
+							var mysid = sid;
+							sid++;
+							body.push(
+								storeStateStmt(tabs,si0,mysid)
+							);
+						}
+						tabs = compileHintPart(tabs, conjuncts[i], body, post);
+						body.push(
+							tabs+targetTimeVar+" = (si > "+targetTimeVar+") ? si : "+targetTimeVar+";"
+						);
+						if(i < conjuncts.length-1) {
+							body.push(unwindStateStmt(tabs,si0,mysid));
+						}
+						/*
+						si0=si
+						store
+						c_1
+							target = si
+							if(result) {
+								rewind
+								c_2
+									target = max(target,si)
+									if(result) {
+										...
+										c_i
+											target = max(target,si)
+											if(result) {
+												while(si < target) {
+													$$nextStep
+												}
+												REST
+											}
+									}
+							}
+						*/
+					} else {
+						//$$conjuncts[i]
+						//if(result) {
+								// REST
+						//}
+						tabs = compileHintPart(tabs, conjuncts[i], body, post);
+						body.push(tabs+"if(result) {");
+						post.unshift(tabs+"}");
+						tabs = tabs + "\t";
+					}
+				}
+				if(hint.metatype == "temporal") {
+					body.push(
+						tabs+"while(si < "+targetTimeVar+") {",
+						nextStepStmt(tabs+"\t"),
+						tabs+"}"
+					);
+				}
+				//Rest of the machine slides in here (a big open conditional)
 				break;
 			case "or":
 				throw new Error("Or not supported yet");

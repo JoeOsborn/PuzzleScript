@@ -829,6 +829,7 @@ var HintCompiler = (function() {
 				var h1 = steps[1];
 				//transform a until b until c ==to==> a until b, rest = b until c
 				//this is convenient because it lets us treat only binary untils.
+				//it's equivalent to "a until (b and b until c)", but we implicitly encode the AND with the call to codegen.
 				if(steps.length > 2) {
 					return codegen({
 						type:"until",
@@ -873,7 +874,7 @@ var HintCompiler = (function() {
 					unwindStateStmt(si0)
 				]).concat(
 					codegen(h0,function(tA,fA){return tA;},
-						[unwindStateStmt(si0+1,["continue "+label+";"],["break "+label+";"])],
+						[unwindStateStmt(si0+"+ 1",["continue "+label+";"],["break "+label+";"])],
 						["break "+label+";"]
 					)
 				).concat([

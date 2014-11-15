@@ -14,6 +14,8 @@ var HintCompiler = (function() {
 	var andRE = /^and\b/i;
 	var orRE = /^or\b/i;
 	var notRE = /^not\b/i;
+	var impliesRE = /^implies\b/i;
+	var iffRE = /^iff\b/i;
 	var lparenRE = /^\(/;
 	var rparenRE = /^\)/;
 
@@ -171,7 +173,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 3);
+				var rhs = parseHint(stream, 5);
 				var conjuncts;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for and's semantics. Groups
@@ -202,7 +204,7 @@ var HintCompiler = (function() {
 					range:{start:conjuncts[0].range.start,end:conjuncts[conjuncts.length-1].range.end}
 				}, stream:rhs.stream};
 			},
-			lbp:3
+			lbp:5
 		},
 		{
 			type:"or",
@@ -210,7 +212,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 4);
+				var rhs = parseHint(stream, 6);
 				var disjuncts;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for and's semantics. Groups
@@ -241,6 +243,41 @@ var HintCompiler = (function() {
 					range:{start:disjuncts[0].range.start,end:disjuncts[disjuncts.length-1].range.end}
 				}, stream:rhs.stream};
 			},
+			lbp:6
+		},
+		{
+			type:"implies",
+			match:matchSymbol(impliesRE, "implies"),
+			nud:noNud,
+			led:function(tok,stream,lhs) {
+				//left-associative n-ary operator
+				var rhs = parseHint(stream, 3);
+				return {parse:{
+					type:"implies", 
+					metatype:anyIsTemporal([lhs,rhs.parse]) ? "temporal" : "predicate", value:{
+						lhs:lhs,
+						rhs:rhs.parse
+					}, 
+					range:{start:lhs[0].range.start,end:rhs.parse.range.end}
+				}, stream:rhs.stream};
+			},
+			lbp:3
+		},
+		{
+			type:"iff",
+			match:matchSymbol(iffRE, "iff"),
+			nud:noNud,
+			led:function(tok,stream,lhs) {
+				var rhs = parseHint(stream, 4);
+				return {parse:{
+					type:"iff", 
+					metatype:anyIsTemporal([lhs,rhs.parse]) ? "temporal" : "predicate", value:{
+						lhs:lhs,
+						rhs:rhs.parse
+					}, 
+					range:{start:lhs[0].range.start,end:rhs.parse.range.end}
+				}, stream:rhs.stream};
+			},
 			lbp:4
 		},
 		{
@@ -252,7 +289,7 @@ var HintCompiler = (function() {
 				return {type:"not", metatype:"predicate", value:{}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok,stream) {
-				var parse = parseHint(stream,5);
+				var parse = parseHint(stream,7);
 				if(parse.parse.type == "ellipses") {
 					throw new Error("Can't put ellipses into a not by itself");
 				}
@@ -264,7 +301,7 @@ var HintCompiler = (function() {
 				}, stream:parse.stream};
 			},
 			led:noLed,
-			lbp:5
+			lbp:7
 		},
 		{
 			type:"lparen",
@@ -388,7 +425,8 @@ var HintCompiler = (function() {
 			nud:function(tok,stream) {
 				return {parse:tok, stream:stream};
 			},
-			led:noLed
+			led:noLed,
+			lbp:0
 		},
 		//non-associative n-ary operator? "permute permute x y z permute a b c" is ambiguous.
 		symbol(permuteRE, "permute"),
@@ -409,7 +447,8 @@ var HintCompiler = (function() {
 			nud:function(tok,stream) {
 				return {parse:tok, stream:stream};
 			},
-			led:noLed
+			led:noLed,
+			lbp:0
 		},
 		{
 			type:"fire",
@@ -427,7 +466,8 @@ var HintCompiler = (function() {
 			nud:function(tok,stream) {
 				return {parse:tok, stream:stream};
 			},
-			led:noLed
+			led:noLed,
+			lbp:0
 		},
 		//stringValue(identifierRE, "identifier"),
 		{
@@ -842,6 +882,10 @@ var HintCompiler = (function() {
 				]).concat(falseA).concat([
 					"}"
 				]);
+			case "implies":
+				throw new Error("Unsupported hint type (yet!) " + hint.type);
+			case "iff":
+				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			case "finished":
 				return evaluatePredicate(["result = si == steps.length-1;"], rest, trueA, falseA);
 			case "winning":
@@ -860,15 +904,15 @@ var HintCompiler = (function() {
 						return evaluatePredicate(["result = states[si].step == "+hint.value.inputDir+";"], rest, trueA, falseA);
 				}			
 			case "pattern1D":
-				throw new Error("Unsupported hint type (yet!)");
+				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			case "pattern2D":
-				throw new Error("Unsupported hint type (yet!)");
+				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			case "winCondition":
-				throw new Error("Unsupported hint type (yet!)");
+				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			case "fire":
-				throw new Error("Unsupported hint type (yet!)");
+				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			default:
-				throw new Error("Unsupported hint type");
+				throw new Error("Unsupported hint type " + hint.type);
 		}
 	}
 	

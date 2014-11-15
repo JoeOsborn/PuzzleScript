@@ -13,7 +13,7 @@ var HintCompiler = (function() {
 	var untilRE = /^until\b/i;
 	var andRE = /^and\b/i;
 	var orRE = /^or\b/i;
-	var notRE = /^not(\?|\b)?/i;
+	var notRE = /^not\b/i;
 	var lparenRE = /^\(/;
 	var rparenRE = /^\)/;
 
@@ -248,9 +248,8 @@ var HintCompiler = (function() {
 			match:function(str,pos) {
 				var match = notRE.exec(str);
 				if(!match) { return null; }
-				if(match[1] && match[1] != "" && match[1] != "?") { return null; }
 				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
-				return {type:"not", metatype:"predicate", value:{useLookahead:match[1] == "?"}, range:{start:pos,end:endPos}, length:match[0].length};
+				return {type:"not", metatype:"predicate", value:{}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok,stream) {
 				var parse = parseHint(stream,5);
@@ -260,7 +259,7 @@ var HintCompiler = (function() {
 				return {parse:{
 					type:"not", 
 					metatype:isTemporal(parse.parse) ? "temporal" : "predicate", 
-					value:{contents:parse.parse, useLookahead:tok.value.useLookahead}, 
+					value:{contents:parse.parse}, 
 					range:{start:tok.range.start,end:parse.stream.token.range.end}
 				}, stream:parse.stream};
 			},
@@ -628,10 +627,10 @@ var HintCompiler = (function() {
 		if(!fA) {
 			return main.join("\n");
 		}
-		return ["if(("+si0+") >= states.length) {"].
-			concat(fA).
-			concat(["} else {"]).
+		return ["if(("+si0+") < states.length) {"].
 			concat(main).
+			concat(["} else {"]).
+			concat(fA).
 			concat("}").
 		join("\n");
 	}
@@ -699,6 +698,22 @@ var HintCompiler = (function() {
 			case "or":
 				throw new Error("Unsupported hint type (yet!)");				
 			case "not":
+				var label = "loop_not_"+hintID;
+				var occurred = "not_occurred_"+hintID;
+				return [
+					label+":",
+					"do {",
+					"var "+occurred+" = false;"
+				].concat(
+					codegen(hint.value.contents, [occurred+" = true;", "break "+label+";"], [occurred+" = false;", "break "+label+";"])
+				).concat([
+					"} while(false);",
+					"if(!"+occurred+") {"
+				]).concat(tA).concat([
+					"} else {"
+				]).concat(fA).concat([
+					"}"
+				]);
 				throw new Error("Unsupported hint type (yet!)");
 			case "then":
 				var steps = hint.value.steps;

@@ -696,22 +696,50 @@ var HintCompiler = (function() {
 				}
 				return pre.concat(codegen(conjuncts[0], andRest(1), trueA, falseA));
 			case "or":
-				throw new Error("Unsupported hint type (yet!)");				
+				var disjuncts = hint.value.disjuncts;
+				var anyPassed = "anyPassed_"+hintID;
+				var si0 = "si0_"+hintID;
+				var store = "", unwind = "";
+				if(isTemporal(hint)) {
+					store = storeStateStmt(si0);
+					unwind = unwindStateStmt(si0);
+				}
+				var result = ["var "+anyPassed+" = false;",store];
+				for(var i = 0; i < disjuncts.length; i++) {
+					var thisFailed = "thisFailed_"+hintID+"_"+i;
+					// var thisFailedD = false;
+					// D
+					// 	rest
+					// 	thisFailedD = true
+					// anyPassed = anyPassed || !thisFailedD
+					// unwind
+					result = result.concat([
+						"var "+thisFailed+" = false;"
+					]).concat(codegen(disjuncts[i],rest,trueA,[thisFailed+" = true;"])).concat([
+						anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+						isTemporal(disjuncts[i]) ? unwind : ""
+					])
+				}
+				// if(!anyPassed) {
+				// 	falseA
+				// }
+				result = result.concat(["if(!"+anyPassed+") {"]).concat(falseA).concat(["}"]);
+				return result;
 			case "not":
-				var label = "loop_not_"+hintID;
-				var occurred = "not_occurred_"+hintID;
+				var label = "loopNot_"+hintID;
+				var occurred = "notOccurred_"+hintID;
 				return [
 					label+":",
 					"do {",
 					"var "+occurred+" = false;"
 				].concat(
-					codegen(hint.value.contents, [occurred+" = true;", "break "+label+";"], [occurred+" = false;", "break "+label+";"])
+					codegen(hint.value.contents, function(tA,fA) { return tA; }, [occurred+" = true;", "break "+label+";"], [occurred+" = false;", "break "+label+";"])
 				).concat([
 					"} while(false);",
 					"if(!"+occurred+") {"
-				]).concat(tA).concat([
+				]).concat(rest(trueA,falseA)).concat([
 					"} else {"
-				]).concat(fA).concat([
+				]).concat(falseA).concat([
 					"}"
 				]);
 				throw new Error("Unsupported hint type (yet!)");
@@ -729,7 +757,7 @@ var HintCompiler = (function() {
 								var anyPassed = "anyPassed_"+hintID+"_"+i;
 								var thisFailed = "thisFailed_"+hintID+"_"+i;
 								var track = [thisFailed+" = true;"];
-								var label = "loop_ellipse_"+hintID+"_"+i;
+								var label = "loopEllipses_"+hintID+"_"+i;
 								return [
 									"var "+anyPassed+" = false;",
 									label+":",

@@ -611,17 +611,29 @@ var HintCompiler = (function() {
 	
 	var AGAIN_LIMIT = 100;
 
-	function nextStepStmt() {
-		return unwindStateStmt("si + 1");
+	function nextStepStmt(tA,fA) {
+		if(tA == null || fA == null) { return new Error("Next steps always have a risk of failure"); }
+		return unwindStateStmt("si + 1",tA,fA);
 	}
 
 	function storeStateStmt(si0) {
 		return "var "+si0+" = si;";
 	}
 	
-	function unwindStateStmt(si0) {
-		return "si = "+si0+";\n"+
-			"level.objects = states[si].state;";
+	function unwindStateStmt(si0,tA,fA) {
+		var main = [
+			"si = "+si0+";",
+			"level.objects = states[si].state;"
+		].concat(tA || []);
+		if(!fA) {
+			return main.join("\n");
+		}
+		return ["if(("+si0+") >= states.length) {"].
+			concat(fA).
+			concat(["} else {"]).
+			concat(main).
+			concat("}").
+		join("\n");
 	}
 	
 	var _hintID = 0;
@@ -646,6 +658,8 @@ var HintCompiler = (function() {
 	function codegen(hint, rest, trueA, falseA) {
 		var hintID = consumeHintID();
 		switch(hint.type) {
+			case "group":
+				return codegen(hint.value.contents, rest, trueA, falseA);
 			case "and":
 				/*
 				A
@@ -661,33 +675,72 @@ var HintCompiler = (function() {
 				var conjuncts = hint.value.conjuncts;
 				var si0 = "si0_"+hintID;
 				var end = "end_"+hintID;
-				var pre = [], updateEnd="", moveToEnd="", unwind="";
+				var pre = [], updateEnd="";
 				if(isTemporal(hint)) {
 					pre = ["var "+end+" = si;",storeStateStmt(si0)];
 					updateEnd = end+" = "+end+" < si ? si : "+end+";";
-					moveToEnd = unwindStateStmt(end);
-					unwind = unwindStateStmt(si0);
 				}
 				var andRest = function(i) {
 					if(i == conjuncts.length) {
 						return function(tA,fA) {
-							return (isTemporal(conjuncts[i-1]) ? [updateEnd] : []).concat([moveToEnd]).concat(rest(tA,fA));
+							return (isTemporal(conjuncts[i-1]) ? [updateEnd] : []).concat([unwindStateStmt(end)]).concat(rest(tA,fA));
 						};
 					} else {
 						return function(tA,fA) {
-							return (isTemporal(conjuncts[i-1]) ? [updateEnd,unwind] : []).concat(codegen(conjuncts[i], andRest(i+1), tA, fA));
+							return (isTemporal(conjuncts[i-1]) ? 
+								[updateEnd,unwindStateStmt(si0)] : 
+								[]).concat(
+								codegen(conjuncts[i], andRest(i+1), tA, fA)
+							);
 						};
 					}
 				}
 				return pre.concat(codegen(conjuncts[0], andRest(1), trueA, falseA));
 			case "or":
-				
+				throw new Error("Unsupported hint type (yet!)");				
 			case "not":
-				
+				throw new Error("Unsupported hint type (yet!)");
 			case "then":
-				
+				var steps = hint.value.steps;
+				var thenRest = function(i) {
+					if(i == steps.length) {
+						return rest;
+					} else {
+						var step = steps[i];
+						if(step.type == "ellipses") {
+							return function(tA, fA) {
+								//consume 0 or more steps
+								var si0 = "si0_"+hintID+"_"+i;
+								var anyPassed = "anyPassed_"+hintID+"_"+i;
+								var thisFailed = "thisFailed_"+hintID+"_"+i;
+								var track = [thisFailed+" = true;"];
+								var label = "loop_ellipse_"+hintID+"_"+i;
+								return [
+									"var "+anyPassed+" = false;",
+									label+":",
+									"do {",
+									"var "+thisFailed+" = false;",
+									storeStateStmt(si0),
+								].concat(thenRest(i+1)(tA,track)).concat([
+									anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+									unwindStateStmt(si0+" + 1",["continue "+label+";"],["break "+label+";"]),
+									"} while(si < states.length);",
+									"if(!"+anyPassed+") {"
+								]).concat(fA).concat([
+									"}"
+								]);
+							};
+						} else {
+							return function(tA, fA) { 
+								return (i > 0 && steps[i-1].type != "ellipses") ? 
+									[nextStepStmt(codegen(step,thenRest(i+1),tA,fA),fA)] : 
+									codegen(step,thenRest(i+1),tA,fA);
+							};
+						}
+					}
+				}
+				return (thenRest(0))(trueA,falseA);
 			case "until":
-				
 				throw new Error("Unsupported hint type (yet!)");
 			case "finished":
 				return evaluatePredicate(["result = si == steps.length-1;"], rest, trueA, falseA);
@@ -707,13 +760,13 @@ var HintCompiler = (function() {
 						return evaluatePredicate(["result = states[si].step == "+hint.value.inputDir+";"], rest, trueA, falseA);
 				}			
 			case "pattern1D":
-				
+				throw new Error("Unsupported hint type (yet!)");
 			case "pattern2D":
-				
+				throw new Error("Unsupported hint type (yet!)");
 			case "winCondition":
-				
+				throw new Error("Unsupported hint type (yet!)");
 			case "fire":
-				
+				throw new Error("Unsupported hint type (yet!)");
 			default:
 				throw new Error("Unsupported hint type");
 		}
@@ -1663,7 +1716,7 @@ var HintCompiler = (function() {
 	}
 	
 	module.compileHintBody = function compileHintBody(str,pos) {
-		sid = 0;
+		hintID = 0;
 		var result = parseHint({token:null,string:str,position:pos}, 0);
 		var hint = result.parse;
 		//drop the )
@@ -1709,8 +1762,12 @@ var HintCompiler = (function() {
 		Handle indendation ONLY via pretty printing.
 		*/
 		var generated = codegen(hint,
-			function(tA, fA) { return tA; },
-			["if(si == states.length-1) {","if(!matchFn || !matchFn()) { level.objects = initObjects; return true; };","}"],
+			function(tA, fA) { return ["if(si == states.length-1) {"].concat(tA).concat(["} else {"]).concat(fA).concat(["}"]); },
+			["if(!matchFn || !matchFn()) {",
+				"level.objects = initObjects;",
+				"return true;",
+				"}"
+			],
 			[]
 		);
 		var hintFn = prettify(["function hint_"+pos.line+"(states, matchFn) {","console.log('hint');"].concat(hintFnPre).concat(generated).concat(hintFnPost).join("\n"));

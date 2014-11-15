@@ -784,7 +784,64 @@ var HintCompiler = (function() {
 				}
 				return (thenRest(0))(trueA,falseA);
 			case "until":
-				throw new Error("Unsupported hint type (yet!)");
+				var steps = hint.value.steps;
+				var h0 = steps[0];
+				var h1 = steps[1];
+				//transform a until b until c ==to==> a until b, rest = b until c
+				//this is convenient because it lets us treat only binary untils.
+				if(steps.length > 2) {
+					return codegen({
+						type:"until",
+						metatype:"temporal",
+						value:{steps:[h0,h1]},
+						range:{start:hint.range.start, end:h1.range.end}
+					},function(tA, fA) {
+						return codegen({
+							type:"until",
+							metatype:"temporal",
+							value:{steps:steps.slice(1)},
+							range:{start:hint.range.start, end:steps[steps.length-1].range.end}
+						}, rest, tA, fA);
+					}, trueA, falseA);
+				}
+				/*
+				anyPassed = false
+				label
+				do {
+					store
+					g(B,rest,trueA,[thisFailed=true])
+					unwind
+					g(A,fn(t,f){t},[step, continue label],[break label])
+				} while(si < steps.length);
+				if(!anyPassed) {
+					falseA
+				}
+				*/
+				var si0 = "si0_"+hintID;
+				var anyPassed = "anyPassed_"+hintID;
+				var thisFailed = "thisFailed_"+hintID;
+				var track = [thisFailed+" = true;"];
+				var label = "loopUntil_"+hintID;
+				return [
+					"var "+anyPassed+" = false;",
+					label+":",
+					"do {",
+					"var "+thisFailed+" = false;",
+					storeStateStmt(si0),
+				].concat(codegen(h1,rest,trueA,track)).concat([
+					anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+					unwindStateStmt(si0)
+				]).concat(
+					codegen(h0,function(tA,fA){return tA;},
+						[unwindStateStmt(si0+1,["continue "+label+";"],["break "+label+";"])],
+						["break "+label+";"]
+					)
+				).concat([
+					"} while(si < states.length);",
+					"if(!"+anyPassed+") {"
+				]).concat(falseA).concat([
+					"}"
+				]);
 			case "finished":
 				return evaluatePredicate(["result = si == steps.length-1;"], rest, trueA, falseA);
 			case "winning":

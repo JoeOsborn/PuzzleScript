@@ -7,7 +7,7 @@ var HintCompiler = (function() {
 	
 	var winningRE = /^winning\b/i;
 	var finishedRE = /^finished\b/i;
-	var ellipsesRE = /^\.\.\.(?=\s|\))/;
+	var ellipsesRE = /^([0-9]+)?\.\.\.(infinity|[0-9]+)?(?=\s|\))/;
 	
 	var thenRE = /^then\b/i;
 	var untilRE = /^until\b/i;
@@ -19,8 +19,6 @@ var HintCompiler = (function() {
 	var lparenRE = /^\(/;
 	var rparenRE = /^\)/;
 
-	var winConditionRE = /^(?:(?:(no|some)\s+(\S+)(?:\s+on\s+(\S+))?)|(?:all\s+(\S+)\s+on\s+(\S+))|(?:(at least|at most|exactly)\s+([0-9]+)\s+(\S+)(?:\s+on\s+(\S+))?))/i;
-
 	var spaceRE = /\s+/;
 	var permuteRE = /^permute\b/i;
 	
@@ -28,11 +26,15 @@ var HintCompiler = (function() {
 	//input: up or down or left or right or act
 	//any: up or down or left or right or act or wait
 	var directionRE = /^(up|down|left|right|moving|action|input|wait|any)\b/i;
+	//(at Pos)? 2d ...
 	var pattern2DRE = /^(2d\s*\n)((?:\s*\S+\s*\n)+)\n/i;
-	var pattern1DRE = /^((?:up|down|left|right|horizontal|vertical)\b)?\[([^\]]*)\]/i;
+	//(at Pos)? Dir? [rule]
+	var pattern1DRE = /^(?:(up|down|left|right|horizontal|vertical)\b)?\[([^\]]*)\]/i;
+
+	var winConditionRE = /^(?:(?:(no|some)\s+(\S+)(?:\s+on\s+(\S+))?)|(?:all\s+(\S+)\s+on\s+(\S+))|(?:(at least|at most|exactly)?\s+([0-9]+)\s+(\S+)(?:\s+on\s+(\S+))?))/i;
 
 	//TODO: put at least/at most/exactly into fireRE?
-	var fireRE = /^fire\s+(\w+)(?:\s+(up|down|left|right|horizontal|vertical|any))?(?:\s+([0-9]+)\s+times)?\b/i;
+	var fireRE = /^fire(?:\s+(up|down|left|right|horizontal|vertical|any))?\s+(\w+)(?:\s+(at least|at most|exactly)?\s+([0-9]+)\s+times)?\b/i;
 	var intRE = /^0|(?:[1-9][0-9]*)/;
 	var identifierRE = /^\w+\b/;
 	
@@ -105,7 +107,27 @@ var HintCompiler = (function() {
 	var TOKENS = [
 		symbol(winningRE, "winning", "predicate"),
 		symbol(finishedRE, "finished", "predicate"),
-		symbol(ellipsesRE, "ellipses"),
+		{
+			type:"ellipses",
+			match:function(str,pos) {
+				var match = ellipsesRE.exec(str);
+				if(!match) { return null; }
+				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
+				var min = match[1] ? parseInt(match[1]) : 0;
+				var max = match[2] ? (match[2].toLowerCase() == "infinity" ? Number.MAX_VALUE : parseInt(match[2])) : Number.MAX_VALUE;
+				if(isNaN(min)) { throw new Error("Invalid minimum on bounded ellipses"); }
+				if(isNaN(max)) { throw new Error("Invalid maximum on bounded ellipses"); }
+				return {type:"ellipses", metatype:"temporal", value:{
+					minLength:min,
+					maxLength:max
+				}, range:{start:pos,end:endPos}, length:match[0].length};
+			},
+			nud:function(tok,stream) {
+				return {parse:tok, stream:stream};
+			},
+			led:noLed,
+			lbp:0
+		},
 		{
 			type:"then",
 			match:matchSymbol(thenRE, "then"),
@@ -303,17 +325,66 @@ var HintCompiler = (function() {
 			led:noLed,
 			lbp:7
 		},
+		//n-ary operator. "permute permute x y z permute a b c" is ambiguous. Let's say it's right associative: permute (permute x y z) (permute a b c)
+		//permute a then b then c d --> permute (a then b then c) d
+		{
+			type:"permute",
+			match:function(str,pos) {
+				var match = permuteRE.exec(str);
+				if(!match) { return null; }
+				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
+				return {type:"permute", metatype:"predicate", value:{}, range:{start:pos,end:endPos}, length:match[0].length};
+			},
+			nud:function(tok,stream) {
+				var conjuncts = [];
+				//permute A B C --> ((... then A) and (... then B) and (... then C))
+				var parse;
+				do {
+					parse = parseHint(stream,0);
+					if(parse.parse.type == "ellipses") {
+						throw new Error("Can't put ellipses into a permute by itself");
+					}
+					//Since permute reads a series of specs, we have to stop it
+					//from crashing into the extra ) at the end of the spec string.
+					var streamPrime = consumeToken(parse.stream);
+					if(streamPrime.token.type == "rparen") {
+						break;
+					}
+					//TODO: these ranges aren't really correct... might make debugging annoying.
+					conjuncts.push({
+						type:"then",
+						metatype:"temporal",
+						value:{
+							steps:[
+								{type:"ellipses",metatype:"keyword",value:"ellipses",range:parse.parse.range},
+								parse.parse
+							]
+						},
+						range:parse.parse.range
+					});
+					stream = parse.stream;
+				} while(true);
+				return {parse:{
+					type:"and",
+					metatype:"temporal",
+					value:{conjuncts:steps}, 
+					range:{start:tok.range.start,end:parse.stream.token.range.end}
+				}, stream:parse.stream};
+			},
+			led:noLed,
+			lbp:0
+		},
 		{
 			type:"lparen",
 			match:matchSymbol(lparenRE, "lparen"),
 			nud:function(tok,stream) {
 				var parse = parseHint(stream,0);
+				if(parse.parse.type == "ellipses") {
+					throw new Error("Can't put ellipses into a group by themselves");
+				}
 				var streamPrime = consumeToken(parse.stream);
 				if(streamPrime.token.type != "rparen") {
 					throw new Error("Missing right paren after parenthesized group");
-				}
-				if(parse.parse.type == "ellipses") {
-					throw new Error("Can't put ellipses into a group by themselves");
 				}
 				return {parse:{type:"group", metatype:"group", value:{contents:parse.parse}, range:{start:tok.range.start,end:streamPrime.token.range.end}}, stream:streamPrime};
 			},
@@ -339,7 +410,7 @@ var HintCompiler = (function() {
 					targetObj = match[4].toLowerCase();
 					onObj = match[5].toLowerCase();
 				} else if(match[6]) {//at least/at most/exactly
-					condition = match[6].toLowerCase();
+					condition = (match[6] || "exactly").toLowerCase();
 					count = parseInt(match[7]);
 					targetObj = match[8].toLowerCase();
 					if(match[8]) { //on Y
@@ -428,8 +499,6 @@ var HintCompiler = (function() {
 			led:noLed,
 			lbp:0
 		},
-		//non-associative n-ary operator? "permute permute x y z permute a b c" is ambiguous.
-		symbol(permuteRE, "permute"),
 		{
 			type:"direction",
 			match:function(str,pos) {
@@ -456,10 +525,11 @@ var HintCompiler = (function() {
 				var match = fireRE.exec(str);
 				if(!match) { return null; }
 				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
-				var rule=match[1], direction = match[2] || "any", count = match[3] || -1;
+				var direction = match[1] || "any", rule=match[2], condition = (match[3] || "exactly").toLowerCase(), count = match[4] || -1;
 				return {type:"fireCondition", metatype:"predicate", value:{
 					rule:rule,
 					direction:direction,
+					condition:condition,
 					count:count
 				}, range:{start:pos, end:endPos}, length:match[0].length};
 			},
@@ -798,20 +868,27 @@ var HintCompiler = (function() {
 								var thisFailed = "thisFailed_"+hintID+"_"+i;
 								var track = [thisFailed+" = true;"];
 								var label = "loopEllipses_"+hintID+"_"+i;
-								return [
-									"var "+anyPassed+" = false;",
-									label+":",
-									"do {",
-									"var "+thisFailed+" = false;",
-									storeStateStmt(si0),
-								].concat(thenRest(i+1)(tA,track)).concat([
-									anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
-									unwindStateStmt(si0+" + 1",["continue "+label+";"],["break "+label+";"]),
-									"} while(si < states.length);",
-									"if(!"+anyPassed+") {"
-								]).concat(fA).concat([
-									"}"
-								]);
+								var minLength = hint.value.minLength;
+								var maxLength = hint.value.maxLength;
+								var ellipsesEnd = "ellipsesEnd"+hintID+"_"+i;
+								return unwindStateStmt("si + "+minLength, 
+									[
+										"var "+anyPassed+" = false;",
+										"var "+ellipsesEnd+" = "+(maxLength == Number.MAX_VALUE ? "states.length-1" : "si+"+maxLength)+";",
+										label+":",
+										"do {",
+										"var "+thisFailed+" = false;",
+										storeStateStmt(si0),
+									].concat(thenRest(i+1)(tA,track)).concat([
+										anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+										unwindStateStmt(si0+" + 1",["continue "+label+";"],["break "+label+";"]),
+										"} while(si <= "+ellipsesEnd+");",
+										"if(!"+anyPassed+") {"
+									]).concat(fA).concat([
+										"}"
+									]),
+									falseA
+								);
 							};
 						} else {
 							return function(tA, fA) { 
@@ -884,9 +961,50 @@ var HintCompiler = (function() {
 					"}"
 				]);
 			case "implies":
-				throw new Error("Unsupported hint type (yet!) " + hint.type);
+				//a => b ---> (not a) or b
+				var lhs = hint.value.lhs;
+				var rhs = hint.value.rhs;
+				var temporal = isTemporal(hint);
+				return codegen({
+					type:"or",
+					metatype:temporal,
+					value:{
+						disjuncts:[
+							{
+								type:"not",
+								metatype:isTemporal(lhs),
+								value:{contents:lhs},
+								range:lhs.range
+							},
+							rhs
+						]
+					},
+					range:hint.range
+				}, rest, trueA, falseA);
 			case "iff":
-				throw new Error("Unsupported hint type (yet!) " + hint.type);
+				//a <=> b ---> (a => b) and (b => a)
+				var lhs = hint.value.lhs;
+				var rhs = hint.value.rhs;
+				var temporal = isTemporal(hint);
+				return codegen({
+					type:"and",
+					metatype:temporal,
+					value:{conjuncts:[
+						{
+							type:"implies",
+							metatype:temporal,
+							value:{lhs:lhs, rhs:rhs},
+							range:hint.range
+						},
+						{
+							type:"implies",
+							metatype:temporal,
+							value:{lhs:rhs, rhs:lhs},
+							range:hint.range
+						}
+					]},
+					range:hint.range
+				}, rest, trueA, falseA);
 			case "finished":
 				return evaluatePredicate(["result = si == steps.length-1;"], rest, trueA, falseA);
 			case "winning":
@@ -917,925 +1035,6 @@ var HintCompiler = (function() {
 		}
 	}
 	
-		//
-	// function codegen(hint, trueC, falseC, soFar) {
-	//
-	// 	// Change compilation scheme: compile(Term, TrueContinuation, FalseContinuation), where the second and third arguments, when called, continue the compilation process.
-	// 	// Each compilation function should have exactly one root level call to compile.
-	// 	//
-	// 	// NOT compiles its contents, swapping those two
-	// 	// NOT A --
-	// 	// 	compile(A, falseContinuation, trueContinuation)
-	// 	// OR compiles the first disjunct, passing the trueContinuation as-is, with a falseContinuation that compiles&calls the next disjunct (or the original falseContinuation if none are left);
-	// 	// A OR B OR * --
-	// 	// 	store
-	// 	// 	compile(A, trueContinuation, function(unwind; compile(B,trueContinuation,function(unwind; compile(C,trueContinuation,function(*,trueContinuation,falseContinuation))))))
-	// 	// AND compiles the first conjunct, passing the falseContinuation as-is, with a trueContinuation that rewinds & compiles&calls the next conjunct (or the original trueContinuation if none are left, fast forwarding to the longest timepoint);
-	// 	// A AND B AND * --
-	// 	// 	end = si
-	// 	// 	store
-	// 	// 	compile(A, function(end = si; unwind; compile(B,function(end = max(end,si); unwind...(while(si < end) { next; } trueContinuation())),falseContinuation)), falseContinuation)
-	// 	// A UNTIL B UNTIL * -- == (A UNTIL (B and B UNTIL *))
-	// 	// 	label:
-	// 	// 	do {
-	// 	// 		store;
-	// 	// 		compile(B,function(compile(B UNTIL *, trueContinuation, falseContinuation)),function(unwind;compile(A,function(next;continue label),falseContinuation)))
-	// 	// 	} while(si < steps.length)
-	// 	// ... --
-	// 	// 	do { store, trueContinuation(), unwind, next } while(si <= steps.length);
-	// 	// 	falseContinuation();
-	// 	// A THEN B THEN * --
-	// 	// 	compile(A,function(compile(B THEN *,trueContinuation,falseContinuation)),falseContinuation)
-	//
-	// 	//NOTE: the pure style makes the pre/during/post structure hard to read. should rewrite with explicit assignments? or impure?
-	// 	switch(hint.type) {
-	// 		hintID = consumeHintID();
-	// 		case "group":
-	// 			return codegen(hint.value.contents, trueC, falseC, soFar);
-	// 		case "not":
-	// 			/*
-	// 			store
-	// 			result = false
-	// 			label:
-	// 			do {
-	// 				Contents
-	// 					result = false & break label
-	// 					result = true & break label
-	// 			} while(false)
-	// 			unwind
-	// 			if(result)
-	// 				trueC
-	// 				falseC
-	// 			*/
-	// 			var loopLabel = "loop_"+hintID;
-	// 			var thisResult = "result_"+hintID;
-	// 			var shouldStore = isTemporal(hint);
-	// 			var store="", unwind="", si0;
-	// 			if(shouldStore) {
-	// 				si0 = "si0_"+hintID;
-	// 				store = storeStateStmt(si0);
-	// 				unwind = unwindStateStmt(si0);
-	// 			}
-	// 			soFar = soFar.concat([
-	// 				shouldStore ? "var "+si0+";" : "",
-	// 				store,
-	// 				"var "+thisResult+" = false;",
-	// 				loopLabel+":",
-	// 				"do {"
-	// 			]);
-	// 			soFar = codegen(hint.value.contents,
-	// 				//break out of the condition immediately if it yields _any_ verified true or false result
-	// 				function(soFar) { return soFar.concat([thisResult+" = false;","break "+loopLabel+";"]); },
-	// 				function(soFar) { return soFar.concat([thisResult+" = true;","break "+loopLabel+";"]); },
-	// 				soFar
-	// 			).concat(["} while(false);", unwind]);
-	// 			//if thisResult is true (the inner condition was false), do trueC
-	// 			soFar = trueC(soFar.concat(["if("+thisResult+") {"]));
-	// 			//otherwise, do falseC
-	// 			soFar = falseC(soFar.concat(["} else {"])).concat(["}"]);
-	// 			return soFar;
-	// 		case "and":
-	// 			/*
-	// 			A and B and C should give:
-	//
-	// 			store
-	// 			A
-	// 				unwind & update-end & B
-	// 					unwind & update-end & C
-	// 						unwind & update-end & rollout-end & trueC
-	// 						unwind & falseC
-	// 					unwind & falseC
-	// 				unwind & falseC
-	// 			unwind & falseC
-	// 			*/
-	// 			var shouldStore = isTemporal(hint);
-	// 			var store = "", unwind = "",
-	// 			var si0 = "si0_"+hintID;
-	// 			soFar = soFar.concat([
-	// 				"var end_"+hintID+" = si;"
-	// 			]);
-	// 			if(shouldStore) {
-	// 				store = storeStateStmt(si0);
-	// 				unwind = unwindStateStmt(si0);
-	// 				soFar = soFar.concat([
-	// 					"var "+si0+";",
-	// 					store
-	// 				]);
-	// 			}
-	// 			var unwindFalse = function(soFar) {
-	// 				return falseC(soFar.concat(unwind));
-	// 			};
-	// 			var updateEnd = ["end_"+hintID+" = end_"+hintID+" < si ? si : end_"+hintID+";"];
-	// 			var goToEnd = ["while(si < end_"+hintID+") {",nextStepStmt(),"}"];
-	// 			var nextConjunctTrueC = function(i) {
-	// 				if(i == hint.value.conjuncts.length) {
-	// 					return function(soFar) {
-	// 						return trueC(soFar.concat(updateEnd).concat(goToEnd));
-	// 					}
-	// 				}
-	// 				return function(soFar) {
-	// 					var c = hint.value.conjuncts[i];
-	// 					return codegen(c,
-	// 						nextConjunctTrueC(i+1),
-	// 						unwindFalse,
-	// 						soFar.concat(updateEnd).concat(unwind)
-	// 					);
-	// 				}
-	// 			};
-	// 			return (nextConjunctTrueC(0))(soFar);
-	// 		case "or":
-	// 			/*
-	// 			control should fall through, and falseC should _only_ be called after every alternative is tried. each alternative should _not_ have the chance to call falseC.
-	// 			IOW: A or B or C should give:
-	//
-	// 			store
-	// 			anyPassed = false;
-	// 			thisFailed = false;
-	// 			A
-	// 				trueC
-	// 				thisFailed = true;
-	// 			unwind
-	// 			anyPassed = anyPassed || !thisFailed;
-	// 			thisFailed = false;
-	// 			B
-	// 				trueC
-	// 				thisFailed=true;
-	// 			unwind
-	// 			anyPassed = anyPassed || !thisFailed;
-	// 			thisFailed = false;
-	// 			C
-	// 				trueC
-	// 				thisFailed=true;
-	// 			anyPassed = anyPassed || !thisFailed;
-	// 			if(!anyPassed) { falseC }
-	//
-	// 			--- The key is that the ONLY way to try "different alternatives higher up" is to fall through. calling falseC is like saying "we are doomed".
-	// 			*/
-	// 			var shouldStore = isTemporal(hint);
-	// 			var store = "", unwind = "",
-	// 			var si0 = "si0_"+hintID;
-	// 			var anyPassed = "anyPassed_"+hintID;
-	// 			soFar = soFar.concat([
-	// 				"var "+anyPassed+" = false;"
-	// 			]);
-	// 			if(shouldStore) {
-	// 				store = storeStateStmt(si0);
-	// 				unwind = unwindStateStmt(si0);
-	// 				soFar = soFar.concat([
-	// 					"var "+si0+";",
-	// 					store
-	// 				]);
-	// 			}
-	//
-	// 			var disjuncts = hint.value.disjuncts;
-	// 			for(var i = 0; i < disjuncts.length; i++) {
-	// 				var thisFailed = "thisFailed_"+hintID+"_"+i;
-	// 				var d = disjuncts[i];
-	// 				soFar = codegen(d,trueC,function(soFar) {
-	// 					return soFar.concat(["thisFailed = false;"]);
-	// 				},soFar.concat("var "+thisFailed+" = false;")).concat([
-	// 					unwind,
-	// 					anyPassed+" = "+anyPassed+" || !"+thisFailed+";"
-	// 				]);
-	// 			}
-	// 			soFar = soFar.concat([
-	// 				"if(!"+anyPassed+") {"
-	// 			]);
-	// 			soFar = falseC(soFar).concat("}");
-	// 			return soFar;
-	// 		case "ellipses":
-	// 			throw new Error("Unhandled ellipses");
-	// 		case "until":
-	// 			var steps = hint.value.steps;
-	// 			//A until B until C --> A until (B and B until C)
-	// 			if(steps.length > 2) {
-	// 				return codegen({
-	// 					type:hint.value.type,
-	// 					metatype:hint.value.metatype,
-	// 					value:{steps:[steps[0], {
-	// 						type:"and",
-	// 						metatype:"temporal",
-	// 						value:{conjuncts:[steps[1], {
-	// 							type:"until",
-	// 							metatype:"temporal",
-	// 							value:{steps:steps.slice(1)},
-	// 							range:{start:steps[1].range.start,end:steps[steps.length-1].range.end}
-	// 						}]},
-	// 						range:{start:steps[1].range.start,end:steps[steps.length-1].range.end}
-	// 					}]},
-	// 					{start:steps[0].range.start,end:steps[steps.length-1].range.end}
-	// 				}, trueC, falseC, soFar);
-	// 			} else {
-	// 				/*
-	// 				A until B
-	//
-	// 				var si0
-	// 				var anyPassed = false
-	// 				label:
-	// 				do {
-	// 					var thisFailed = false
-	// 					store
-	// 					B
-	// 						trueC
-	// 						thisFailed = true
-	// 					unwind
-	// 					anyPassed = anyPassed || !thisFailed
-	// 					A
-	// 						step
-	// 						break label
-	// 				} while(si < steps.length);
-	// 				unwind
-	// 				//B never became true -- maybe we ran out of steps, or maybe A became false first
-	// 				if(!anyPassed) { falseC }
-	// 				*/
-	// 				var h0 = steps[0];
-	// 				var h1 = steps[1];
-	// 				var si0 = "si0_"+hintID;
-	// 				var store = storeStateStmt(si0);
-	// 				var unwind = unwindStateStmt(si0);
-	// 				var label = "loop_"+hintID;
-	// 				var anyPassed = "anyPassed_"+hintID;
-	// 				var thisFailed = "thisFailed_"+hintID;
-	// 				soFar = soFar.concat([
-	// 					"var "+si0+";",
-	// 					"var "+anyPassed+" = false;",
-	// 					label+":",
-	// 					"do {",
-	// 					"var "+thisFailed+" = false;",
-	// 					store
-	// 				]);
-	// 				soFar = codegen(h0,
-	// 					trueC,
-	// 					function(soFar) { return soFar.concat([thisFailed+" = true;"]); },
-	// 					soFar
-	// 				);
-	// 				soFar = soFar.concat([
-	// 					unwind,
-	// 					anyPassed+" = "+anyPassed+" || !"+thisFailed+";"
-	// 				]);
-	// 				soFar = codegen(h1,
-	// 					function(soFar) { return soFar.concat([nextStepStmt()]); },
-	// 					function(soFar) { return soFar.concat(["break "+label+";"]); },
-	// 					soFar
-	// 				);
-	// 				soFar = soFar.concat([
-	// 					"} while(si < states.length);",
-	// 					unwind,
-	// 					"if(!"+anyPassed+") {"
-	// 				]);
-	// 				soFar = falseC(soFar);
-	// 				return soFar.concat(["}"]);
-	// 			}
-	// 		case "then":
-	// 			/*
-	// 			A then B
-	// 			A
-	// 				step & B
-	// 					trueC
-	// 					falseC
-	// 				falseC
-	//
-	// 			...
-	// 				si0
-	// 				anyPassed = false
-	// 				do {
-	// 					thisFailed = false
-	// 					store
-	// 					trueC(falseC\{thisFailed=true})
-	// 					unwind
-	// 					anyPassed = anyPassed || thisFailed
-	// 					step
-	// 				} while(si < steps.length)
-	// 				if(!anyPassed) { falseC }
-	//
-	// 			FIXME: BUT! I'm not totally sure this will work with (A then ...) and C -- let's experiment.
-	// 			*/
-	// 			var steps = hint.value.steps;
-	// 			var nextStepTrueC = function(i,fc) {
-	// 				if(i >= steps.length) { return trueC; }
-	// 				var s = steps[i];
-	// 				return function(soFar) {
-	// 					if(s.type == "ellipses") {
-	// 						//consume 0...K inputs then proceed
-	// 						var si0 = "si0_"+hintID+"_"+i;
-	// 						var store = storeStateStmt(si0);
-	// 						var unwind = unwindStateStmt(si0);
-	// 						var anyPassed = "anyPassed_"+hintID+"_"+i;
-	// 						var thisFailed = "thisFailed_"+hintID+"_"+i;
-	// 						soFar = soFar.concat([
-	// 							"var "+si0+";",
-	// 							"do {",
-	// 							thisFailed+" = false;",
-	// 							store
-	// 						]);
-	// 						var thisFailedC = function(soFar) {
-	// 							return soFar.concat([thisFailed+" = true;"]);
-	// 						};
-	// 						soFar = (nextStepTrueC(i+1,thisFailedC))(soFar);
-	// 						soFar = soFar.concat([
-	// 							unwind,
-	// 							anyPassed + " = "+ anyPassed + " || "+thisFailed;
-	// 							nextStepStmt(),
-	// 							"} while(si < steps.length);",
-	// 							"if(!"+anyPassed+") {",
-	// 							fc,
-	// 							"}"
-	// 						]);
-	// 					} else {
-	// 						return codegen(s,
-	// 							nextStepTrueC(i+1,fc),
-	// 							fc,
-	// 							soFar.concat([nextStepStmt()])
-	// 						)
-	// 					}
-	// 				}
-	// 			};
-	// 			return (nextStepTrueC(0,falseC))(soFar);
-	// 		case "winning":
-	// 			return evaluatePredicate("result = winning;", trueC, falseC, soFar);
-	// 		case "finished":
-	// 			return evaluatePredicate("result = finished;", trueC, falseC, soFar);
-	// 		case "direction":
-	// 			switch(hint.value.direction) {
-	// 				case "any":
-	// 					return evaluatePredicate("result = true;", trueC, falseC, soFar);
-	// 				case "wait":
-	// 					return evaluatePredicate("result = states[si].step == -1;", trueC, falseC, soFar);
-	// 				case "input":
-	// 					return evaluatePredicate("result = states[si].step != -1;", trueC, falseC, soFar);
-	// 				case "moving":
-	// 					return evaluatePredicate("result = states[si].step >= 0 && states[si].step <= 3;", trueC, falseC, soFar);
-	// 				default:
-	// 					return evaluatePredicate("result = states[si].step == "+hint.value.inputDir+";", trueC, falseC, soFar);
-	// 			}
-	// 		case "pattern1D":
-	// 		case "pattern2D":
-	// 		case "fire":
-	// 		case "winCondition":
-	// 		default:
-	// 			throw new Error("Unhandled hint type "+hint.type);
-	// 	}
-	// }
-	//
-	// //pred MUST assign to result
-	// function evaluatePredicate(pred, trueC, falseC, soFar) {
-	// 	soFar = soFar.concat([pred, "if(result) {"]);
-	// 	soFar = trueC(soFar);
-	// 	soFar = soFar.concat(["} else {"]);
-	// 	soFar = falseC(soFar);
-	// 	soFar = soFar.concat(["}"]);
-	// 	return soFar;
-	// }
-	//
-	// function compileHintPart(tabs,hint,body,post) {
-	// 	switch(hint.type) {
-	// 		//NOTE: anywhere "do a step" or "runCompleteStep(step)" appears below, that's a step plus again loops.
-	// 		case "literal":
-	// 			body.push.apply(body,hint.value.body.map(function(str) { return tabs+str; }));
-	// 			post.unshift.apply(post,hint.value.post.map(function(str) { return tabs+str; }));
-	// 			return tabs+hint.value.tabs;
-	// 		case "then":
-	// 			//include left hint's compiled form. if result == false or si == steps.length, fail; if result == true, do a step(si++), then insert the right hint (it might change result to false)
-	// 			var steps = hint.value.steps;
-	// 			for(var i = 0; i < steps.length; i++) {
-	// 				var step = steps[i];
-	// 				if(step.type == "ellipses") {
-	// 					/*
-	// 					var $si0 = si;
-	// 					label:
-	// 					do {
-	// 						$$storeState
-	// 						result = true;
-	//
-	// 						REST
-	//
-	// 						unwind to $si0;
-	// 						$si0++;
-	// 						$$nextStep
-	// 					} while($si0 < steps.length);
-	// 					*/
-	// 					var si0 = gensym("si0",step);
-	// 					var mysid = sid;
-	// 					sid++;
-	// 					body.push(
-	// 						tabs+"var "+si0+" = si;",
-	// 						tabs+si0+":",
-	// 						tabs+"do {",
-	// 						//TODO: don't store/unwind if REST is non-temporal
-	// 						storeStateStmt(tabs+"\t",si0,mysid),
-	// 						//set result to true (it might have been set false on a previous trip through)
-	// 						tabs+"\tresult = true;",
-	// 						tabs+"\t//next hint part"
-	// 					);
-	// 					//the rest of the machine will slide in right here. then...:
-	// 					post.unshift(
-	// 						unwindStateStmt(tabs+"\t",si0,mysid),
-	// 						nextStepStmt(tabs+"\t"),
-	// 						tabs+"} while("+si0+" < steps.length);"
-	// 					);
-	// 					sid++;
-	// 				} else {
-	// 					/*
-	// 					STEPS[i]
-	// 					if(result) {
-	// 						$$nextStep
-	//
-	// 						REST
-	//
-	// 					}
-	// 					*/
-	// 					tabs = compileHintPart(tabs,steps[i],body,post);
-	// 					body.push(
-	// 						tabs+"if("+(negations % 2 == 0 ? "" : "!")+"result) {"
-	// 					);
-	// 					if(i < steps.length -1 && steps[i+1].type != "ellipses") {
-	// 						body.push(nextStepStmt(tabs+"\t"));
-	// 					}
-	// 					body.push(tabs+"\t//next hint part");
-	// 					//the rest of the machine will slide in right here. then...:
-	// 					post.unshift(
-	// 						tabs+"}"
-	// 					);
-	// 				}
-	// 				tabs = tabs + "\t";
-	// 			}
-	// 			break;
-	// 		case "until":
-	// 			/* X until Y until Z
-	// 			(Y then (Y until Z)) or (X then (Y then Z)) or (X then (Y then Y then Z)) or ... (X then X then (Y then Z)) or...
-	//
-	// 			on finding a successful X
-	// 				move forward until reaching Y
-	// 					on finding a successful Y
-	// 						move forward until reaching Z
-	// 							on finding a successful Z
-	// 								succeed
-	// 					else fail (find the next X)
-	// 				else fail
-	//
-	// 				else Y is false so retry up one
-	//
-	// 			(a or (a then b)) until c --> [a b c] should pass.
-	//
-	// 			var si0, si00
-	// 			do {
-	// 				si0 = si
-	// 				$$store
-	// 				(si == si0 || LHS)
-	// 					RHS
-	// 						REST
-	// 				$$rewind
-	// 				$$next
-	// 			} while(si0 < steps.length)
-	//
-	// 			a until b then c
-	// 			[a ab ab c]
-	//
-	// 			[a b X] -- attempt 1
-	// 			[a a b c] -- attempt 2
-	//
-	// 			it's cleanest if we take the first match only
-	//
-	// 			(a until ((c then d) OR b)) then d
-	// 			[a bc d]
-	//
-	// 			NOPE, got to take all the matches. :x
-	// 			*/
-	//
-	// 			for(var i = 0; i < steps.length-1; i++) {
-	// 				var lhs = steps[i];
-	// 				var rhs = steps[i+1];
-	// 				var si0 = gensym("si0",lhs);
-	// 				var si00 = gensym("si00",lhs);
-	// 				var mysid = sid;
-	// 				sid++;
-	// 				body.push(
-	// 					tabs+"var "+si00+" = si;",
-	// 					tabs+"var "+si0+" = si;",
-	// 					tabs+"do {",
-	// 					tabs+si0+" = si;",
-	// 					storeStateStmt(tabs,si0,mysid)
-	// 				);
-	// 				post.unshift(
-	// 					unwindStateStmt(tabs+"\t",si0,mysid),
-	// 					nextStepStmt(tabs+"\t"),
-	// 					tabs+"} while("+si0+" < steps.length);"
-	// 				);
-	// 				tabs = tabs + "\t";
-	// 				tabs = compileHintPart(tabs, {type:"or", metatype:"temporal", value:{disjuncts:[
-	// 					{type:"literal",metatype:"predicate",value:{body:["si0==si00"],post:[],tabs:""}},
-	// 					lhs
-	// 				]}}, body, post);
-	// 				//slide in the RHS
-	// 				tabs = compileHintPart(tabs, rhs, body, post);
-	// 				//rest of machine slides in here
-	// 			}
-	// 			//
-	// 			//
-	// 			//
-	// 			// /*
-	// 			// var $si0 = si;
-	// 			// $si0:
-	// 			// do {
-	// 			//
-	// 			// 	$$storeState
-	// 			// 	STEPS[i+1]
-	// 			// 		if(result) {
-	// 			// 			REST
-	// 			// 		}
-	// 			// 		$$unwindState
-	// 			//
-	// 			// 		STEPS[i]
-	// 			// 			if(result) {
-	// 			// 				//bail out if STEPS[i] does not hold
-	// 			// 				break;
-	// 			// 			}
-	// 			// 		$$nextStep //always nextStep, even if STEPS[i] is an arrow.
-	// 			// 	 	//a b a b a b c --> (a then b) until c. the "a then b" moves the cursor to the b, then it gets moved again.
-	// 			// } while($si0 < steps.length);
-	// 			// */
-	// 			// var steps = hint.value.steps;
-	// 			// for(var i = 0; i < steps.length-1; i++) {
-	// 			// 	var step = steps[i];
-	// 			// 	var nextStep = steps[i+1];
-	// 			// 	var si0 = gensym("si0",step);
-	// 			// 	var mysid = sid;
-	// 			// 	sid++;
-	// 			// 	body.push(
-	// 			// 		tabs+"var "+si0+" = si;",
-	// 			// 		tabs+si0+":",
-	// 			// 		tabs+"do {",
-	// 			// 		//TODO: don't store/unwind if STEPS[i+1] is non-temporal and REST is non-temporal
-	// 			// 		storeStateStmt(tabs+"\t",si0,mysid),
-	// 			// 		//set result to true (it might have been set false on a previous trip through)
-	// 			// 		tabs+"\tresult = true;",
-	// 			// 		tabs+"\t//until RHS "+si0
-	// 			// 	);
-	// 			// 	var oldTabs = tabs;
-	// 			// 	var preBody = [oldTabs+"\t//until LHS "+si0], prePost = [];
-	// 			// 	var lhsTabs = compileHintPart(oldTabs+"\t",step,preBody,prePost);
-	// 			// 	//FIXME: this is wrong. consider "(a OR (a then b)) until c" and "[a,b,c]".
-	// 			// 	preBody.push(
-	// 			// 		lhsTabs+"if(result) {",
-	// 			// 		nextStepStmt(lhsTabs+"\t"),
-	// 			// 		lhsTabs+"\tcontinue "+si0+";",
-	// 			// 		lhsTabs+"} else {",
-	// 			// 		lhsTabs+"\tbreak "+si0+";",
-	// 			// 		lhsTabs+"}"
-	// 			// 	);
-	// 			// 	post.unshift.apply(post,
-	// 			// 		preBody.concat(prePost).concat([
-	// 			// 			unwindStateStmt(oldTabs+"\t",si0,mysid)
-	// 			// 		]).
-	// 			// 		concat([
-	// 			// 			oldTabs+"\tif(!result) { break "+si0+"; }",
-	// 			// 			oldTabs+"} while("+si0+" < steps.length);"
-	// 			// 		])
-	// 			// 	);
-	// 			//
-	// 			// 	tabs = compileHintPart(tabs+"\t",nextStep,body,post);
-	// 			// 	body.push(
-	// 			// 		tabs+"if(result) { //next hint part "+si0
-	// 			// 	);
-	// 			// 	//the rest of the machine will slide in right here. then...:
-	// 			// 	post.unshift(tabs+"} //end hint part "+si0);
-	// 			// 	tabs = tabs + "\t";
-	// 			// }
-	// 			//in a loop:
-	// 			//  include right hint's compiled form.
-	// 			//    if result==true, succeed & break
-	// 			//    if result==false:
-	// 			//      include left hint's compiled form.
-	// 			//      if result==true and si < steps.length, do a step(si++) and continue in the loop
-	// 			//      if result==false, fail
-	// 			break;
-	// 		case "group":
-	// 			body.push(tabs+"//begin group");
-	// 			post.unshift(tabs+"//end group");
-	// 			tabs = compileHintPart(tabs, hint.value.contents, body, post);
-	// 			break;
-	// 		case "ellipses":
-	// 			throw new Error("Ellipses not handled by an arrow.");
-	// 			break;
-	// 		case "direction":
-	// 			//succeed if checkfn body succeeds
-	// 			switch(hint.value.direction) {
-	// 				case "any":
-	// 					body.push(tabs+"result = true;");
-	// 					break;
-	// 				case "wait":
-	// 					body.push(tabs+"result = steps[si-1] == -1;");
-	// 					break;
-	// 				case "input":
-	// 					body.push(tabs+"result = steps[si-1] != -1;");
-	// 					break;
-	// 				case "moving":
-	// 					body.push(tabs+"result = steps[si-1] >= 0 && steps[si-1] <= 3;");
-	// 					break;
-	// 				default:
-	// 					body.push(tabs+"result = steps[si-1] == "+hint.value.inputDir+";");
-	// 					break;
-	// 			}
-	// 			break;
-	// 		case "winning":
-	// 			body.push(tabs+"result = winning;");
-	// 			break;
-	// 		case "finished":
-	// 			body.push(tabs+"result = (si == steps.length);");
-	// 			break;
-	// 		case "and":
-	// 			var conjuncts = hint.value.conjuncts;
-	// 			var targetTimeVar = "target_"+hint.range.start.line+"_"+hint.range.start.ch;
-	// 			var si0 = gensym("si0_cjn",hint);
-	// 			if(hint.metatype == "temporal") {
-	// 				body.push(
-	// 					tabs+"var "+targetTimeVar+" = si;",
-	// 					tabs+"var "+si0+" = si;"
-	// 				);
-	// 			}
-	// 			for(var i = 0; i < conjuncts.length; i++) {
-	// 				if(isTemporal(conjuncts[i])) {
-	// 					/*
-	// 					si0=si
-	// 					store
-	// 					c_1
-	// 						target = si
-	// 						if(result) {
-	// 							rewind
-	// 							c_2
-	// 								target = max(target,si)
-	// 								if(result) {
-	// 									...
-	// 									c_i
-	// 										target = max(target,si)
-	// 										if(result) {
-	// 											while(si < target) {
-	// 												$$nextStep
-	// 											}
-	// 											REST
-	// 										}
-	// 								}
-	// 						}
-	// 					*/
-	// 					if(i < conjuncts.length-1) {
-	// 						var mysid = sid;
-	// 						sid++;
-	// 						body.push(
-	// 							storeStateStmt(tabs,si0,mysid)
-	// 						);
-	// 					}
-	// 					tabs = compileHintPart(tabs, conjuncts[i], body, post);
-	// 					body.push(
-	// 						tabs+targetTimeVar+" = (si > "+targetTimeVar+") ? si : "+targetTimeVar+";"
-	// 					);
-	// 					if(i < conjuncts.length-1) {
-	// 						body.push(unwindStateStmt(tabs,si0,mysid));
-	// 					}
-	// 				} else {
-	// 					//$$conjuncts[i]
-	// 					//if(result) {
-	// 							// REST
-	// 					//}
-	// 					tabs = compileHintPart(tabs, conjuncts[i], body, post);
-	// 					body.push(tabs+"if(result) {");
-	// 					post.unshift(tabs+"}");
-	// 					tabs = tabs + "\t";
-	// 				}
-	// 			}
-	// 			if(hint.metatype == "temporal") {
-	// 				body.push(
-	// 					tabs+"while(si < "+targetTimeVar+") {",
-	// 					nextStepStmt(tabs+"\t"),
-	// 					tabs+"}"
-	// 				);
-	// 			}
-	// 			//Rest of the machine slides in here (a big open conditional)
-	// 			break;
-	// 		case "or":
-	// 			/*
-	// 			$$store
-	// 			c_1
-	// 				REST
-	// 		  if(!result) {
-	// 		  	$$rewind
-	// 			}
-	// 			c_2
-	// 				REST
-	// 			...
-	// 			*/
-	// 			problem: REST needs to be inserted many times. how to deal with that?
-	//
-	// 			throw new Error("Or not supported yet");
-	// 			break;
-	// 		case "not":
-	// 			if(hint.value.useLookahead) {
-	// 				push store state to body
-	// 			}
-	// 			switch(hint.value.contents.type) {
-	// 				case "not":
-	// 					tabs = compileHintPart(tabs, hint.value.contents.value.contents, body, post);
-	// 					break;
-	// 				case "group":
-	// 					tabs = compileHintPart(tabs, {
-	// 						type:"not",
-	// 						metatype:hint.metatype,
-	// 						value:{
-	// 							contents:hint.value.contents.value.contents,
-	// 							useLookahead:false
-	// 						},
-	// 						range:hint.range
-	// 					})
-	// 					break;
-	// 				case "and":
-	// 					tabs = compileHintPart(tabs, {
-	// 						type:"or",
-	// 						metatype:hint.value.contents.metatype,
-	// 						value:{
-	// 							disjuncts:hint.value.contents.conjuncts.map(function(d) {
-	// 								return {
-	// 									type:"not",
-	// 									metatype:anyIsTemporal(hint.value.contents.conjuncts) ? "temporal" : "predicate",
-	// 									value:{contents:d, useLookahead:false},
-	// 									range:d.range
-	// 								};
-	// 							})
-	// 						}
-	// 						range:hint.range
-	// 					}, body, post);
-	// 					break;
-	// 				case "or":
-	// 					tabs = compileHintPart(tabs, {
-	// 						type:"and",
-	// 						metatype:hint.value.contents.metatype,
-	// 						value:{
-	// 							conjuncts:hint.value.contents.disjuncts.map(function(d) {
-	// 								return {
-	// 									type:"not",
-	// 									metatype:anyIsTemporal(hint.value.contents.disjuncts) ? "temporal" : "predicate",
-	// 									value:{contents:d, useLookahead:false},
-	// 									range:d.range
-	// 								};
-	// 							})
-	// 						}
-	// 						range:hint.range
-	// 					}, body, post);
-	// 					break;
-	// 				case "then":
-	// 					//not (A then B) -- (not A) or (A then not B)
-	// 					// distribute not. a then of length K goes into a K-disjunction of thens:
-	// 					var disjuncts = [];
-	// 					var steps = hint.value.contents.value.steps;
-	// 					var thisDisjunct, theseSteps;
-	// 					for(var i = 0; i < steps.length; i++) {
-	// 						thisDisjunct = {
-	// 							type:"then",
-	// 							metatype:"temporal",
-	// 							value:{steps:theseSteps},
-	// 							range:steps[i].range
-	// 						}
-	// 						for(var j = 0; j < i; j++) {
-	// 							//j then...
-	// 							theseSteps.push(steps[j]);
-	// 						}
-	// 						//not i
-	// 						theseSteps.push({
-	// 							type:"not",
-	// 							metatype:isTemporal(steps[i]) ? "temporal" : "predicate",
-	// 							value:{contents:steps[i]}
-	// 							range:steps[i].range
-	// 						})
-	// 						disjuncts.push(thisDisjunct);
-	// 					}
-	// 					tabs = compileHintPart(tabs, {
-	// 						type:"or",
-	// 						metatype:"temporal", //definitely temporal, since (nearly) each disjunct is a "then"
-	// 						value:{
-	// 							disjuncts:disjuncts
-	// 						}
-	// 						range:hint.range
-	// 					}, body, post);
-	// 					break;
-	// 				case "until":
-	// 					//handle until specially:
-	// 					/*
-	// 					for steps lhs=i, rhs=i+1
-	// 					loop:
-	// 					do {
-	// 						not rhs
-	// 							not lhs
-	// 								REST
-	// 							$$nextStep
-	// 							continue loop;
-	// 						break loop;
-	// 					} while(si < steps.length);
-	// 					*/
-	// 					var steps = hint.value.contents.value.steps;
-	// 					for(var i = 0; i < steps.length-1; i++) {
-	// 						var loopLabel = gensym("not_until",hint);
-	// 						body.push(tabs+loopLabel+":");
-	// 						body.push(tabs+"do {");
-	// 						post.unshift(
-	// 							tabs+"\tbreak "+loopLabel+";",
-	// 							tabs+"while(si < steps.length);"
-	// 						)
-	// 						tabs = compileHintPart(tabs, {
-	// 							type:"not",
-	// 							metatype:isTemporal(rhs) ? "temporal" : "predicate",
-	// 							value:{contents:rhs},
-	// 							range:rhs.range
-	// 						}, body, post);
-	// 						post.unshift(
-	// 							nextStepStmt(tabs),
-	// 							tabs+"\tcontinue "+loopLabel+";",
-	// 						)
-	// 						tabs = compileHintPart(tabs, {
-	// 							type:"not",
-	// 							metatype:isTemporal(lhs) ? "temporal" : "predicate",
-	// 							value:{contents:lhs},
-	// 							range:lhs.range
-	// 						}, body, post);
-	// 						//rest slides in here
-	// 					}
-	// 					break;
-	// 				default:
-	// 					if(isTemporal(hint.value.contents)) {
-	// 						throw new Error("Uh oh, doing a poorly-founded negation");
-	// 					}
-	// 					tabs = compileHintPart(tabs, hint.value.contents, body, post);
-	// 					body.push(tabs+"result = !result;");
-	// 					break;
-	// 			}
-	// 			if(hint.value.useLookahead) {
-	// 				push unwind state to body
-	// 			}
-	//
-	// 			// if(hint.metatype == "temporal") {
-	// 			// 	/*
-	// 			// 	store state?
-	// 			// 	loop: do{
-	// 			// 		BODY
-	// 			// 	while(false); ///acts as a "goto fail" to support NOTs of loopy things
-	// 			// 	result = !result;
-	// 			// 	unwind?
-	// 			// 	REST
-	// 			//
-	// 			// 	Semantics: NOT always takes the shortest option? No, that sucks....
-	// 			//
-	// 			// 	(not (... then a)) then b
-	// 			// 	"not-a-sequence-ending-with-a followed by a b"
-	// 			// 	[a c a c b]
-	// 			// 	[a c X] -- attempt 1
-	// 			// 	[a c a c B}] -- attempt 2
-	// 			//
-	// 			// 	this means the "break" trick can't be used since the inner nondeterminacy needs to do its loopy thing. I need to put an "} else { REST " on every "if (result) {...}" check within the scope of the NOT...
-	// 			// 	*/
-	// 			// 	var si0, mysid;
-	// 			// 	var lookahead = hint.value.useLookahead;
-	// 			// 	if(lookahead) {
-	// 			// 		si0 = gensym("si0",hint.value.contents); //lookahead
-	// 			// 		mysid = sid; //lookahead
-	// 			// 		sid++; //lookahead
-	// 			// 	}
-	// 			// 	body.push(
-	// 			// 		tabs+"//begin NOT",
-	// 			// 		lookahead ? tabs+"var "+si0+" = si;" : "", //lookahead
-	// 			// 		lookahead ? storeStateStmt(tabs,si0,mysid) : "" //lookahead
-	// 			// 	);
-	// 			// 	var preBody = [], prePost = [];
-	// 			// 	var contentTabs = compileHintPart(tabs, hint.value.contents, preBody, prePost);
-	// 			// 	body.push.apply(body,
-	// 			// 		[
-	// 			// 		  tabs+si0+"_not:",
-	// 			// 		  tabs+"do {"
-	// 			// 		].
-	// 			// 		concat(preBody).concat([contentTabs+"break "+si0+"_not;"]).concat(prePost).
-	// 			// 		concat([
-	// 			// 			tabs+"while(false);",
-	// 			// 			lookahead ? unwindStateStmt(tabs,si0,mysid) : "", //lookahead
-	// 			// 			tabs+"result = !result;",
-	// 			// 			tabs+"//end NOT"
-	// 			// 		])
-	// 			// 	);
-	// 			// 	//rest of the machine goes here
-	// 			//
-	// 			// //not a
-	// 			// } else {
-	// 			// 	/*
-	// 			// 		BODY
-	// 			// 			result = !result;
-	// 			// 		REST
-	// 			// 	*/
-	// 			// 	tabs = compileHintPart(tabs, hint.value.contents, body, post);
-	// 			// 	body.push(tabs+"result = !result;");
-	// 			// }
-	// 			break;
-	// 		default:
-	// 			logError("Can't handle this kind of hint yet:"+JSON.stringify(hint));
-	// 			break;
-	// 	}
-	// 	return tabs;
-	// }
-	//
 	function prettify(str) {
 		var tabs = "";
 		var lines = str.split("\n");
@@ -1876,36 +1075,6 @@ var HintCompiler = (function() {
 			"return false;", 
 			"}"
 		];
-		/*
-		Change compilation scheme: compile(Term, TrueContinuation, FalseContinuation), where the second and third arguments, when called, continue the compilation process.
-		Each compilation function should have exactly one root level call to compile.
-		
-		NOT compiles its contents, swapping those two
-		NOT A --
-			compile(A, falseContinuation, trueContinuation)
-		OR compiles the first disjunct, passing the trueContinuation as-is, with a falseContinuation that compiles&calls the next disjunct (or the original falseContinuation if none are left);
-		A OR B OR * --
-			store
-			compile(A, trueContinuation, function(unwind; compile(B,trueContinuation,function(unwind; compile(C,trueContinuation,function(*,trueContinuation,falseContinuation))))))
-		AND compiles the first conjunct, passing the falseContinuation as-is, with a trueContinuation that rewinds & compiles&calls the next conjunct (or the original trueContinuation if none are left, fast forwarding to the longest timepoint);
-		A AND B AND * --
-			end = si
-			store
-			compile(A, function(end = si; unwind; compile(B,function(end = max(end,si); unwind...(while(si < end) { next; } trueContinuation())),falseContinuation)), falseContinuation)
-		A UNTIL B UNTIL * -- == (A UNTIL (B and B UNTIL *))
-			label:
-			do {
-				store;
-				compile(B,function(compile(B UNTIL *, trueContinuation, falseContinuation)),function(unwind;compile(A,function(next;continue label),falseContinuation)))
-			} while(si < steps.length)
-		... -- 
-			do { store, trueContinuation(), unwind, next } while(si <= steps.length);
-			falseContinuation();
-		A THEN B THEN * --
-			compile(A,function(compile(B THEN *,trueContinuation,falseContinuation)),falseContinuation)
-		
-		Handle indendation ONLY via pretty printing.
-		*/
 		var generated = codegen(hint,
 			function(tA, fA) { return ["if(si == states.length-1) {"].concat(tA).concat(["} else {"]).concat(fA).concat(["}"]); },
 			["if(!matchFn || !matchFn()) {",

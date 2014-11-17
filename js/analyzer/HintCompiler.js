@@ -432,61 +432,6 @@ var HintCompiler = (function() {
 				var filter1 = state.objectMasks[targetObj];
 				var filter2 = state.objectMasks[onObj];
 				return {type:"winCondition", metatype:"predicate", value:{
-					/*check: function() {
-						switch(condition) {
-							case "no":
-							{
-								for (var i=0;i<level.n_tiles;i++) {
-									var cell = level.getCellInto(i,_o10);
-									if ( (!filter1.bitsClearInArray(cell.data)) &&  
-										 (!filter2.bitsClearInArray(cell.data)) ) {
-										return false;
-									}
-								}
-								return true;
-							}
-							case "some":
-							{
-								for (var i=0;i<level.n_tiles;i++) {
-									var cell = level.getCellInto(i,_o10);
-									if ( (!filter1.bitsClearInArray(cell.data)) &&  
-										 (!filter2.bitsClearInArray(cell.data)) ) {
-										return true;
-									}
-								}
-								return false;
-							}
-							case "all":
-							{
-								for (var i=0;i<level.n_tiles;i++) {
-									var cell = level.getCellInto(i,_o10);
-									if ( (!filter1.bitsClearInArray(cell.data)) &&  
-										 (filter2.bitsClearInArray(cell.data)) ) {
-										return false;
-									}
-								}
-								return true;
-							}
-							case "at least":
-							case "at most":
-							case "exactly":
-							{
-								var actualCount = 0;
-								for (var i=0;i<level.n_tiles;i++) {
-									var cell = level.getCellInto(i,_o10);
-									if ( (!filter1.bitsClearInArray(cell.data)) &&  
-										 (filter2.bitsClearInArray(cell.data)) ) {
-										actualCount++;
-									}
-								}
-								if(condition == "exactly") { return actualCount == count; }
-								if(condition == "at most") { return actualCount <= count; }
-								if(condition == "at least") { return actualCount >= count; }
-								return false;
-							}
-						}
-						return false;
-					},*/
 					condition:condition,
 					target:state.objectMasks[targetObj],
 					on:state.objectMasks[onObj],
@@ -1027,7 +972,85 @@ var HintCompiler = (function() {
 			case "pattern2D":
 				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			case "winCondition":
-				throw new Error("Unsupported hint type (yet!) " + hint.type);
+				var idx = "winCondition_i_"+hintID;
+				var failed = "winCondition_failed_"+hintID;
+				var f1 = hint.value.target;
+				var f2 = hint.value.on;
+				var checks1 = "("; //target is not there
+				var checks2 = "("; //object is not there
+				for(var i = 0; i < STRIDE_OBJ; i++) {
+					//!(data[i] & arr[i]) && !(data[i+1] & r[i+1]) && ...
+					checks1 = checks1 + "!("+f1.data[i]+" & level.objects["+idx+"*STRIDE_OBJ+"+i+"])" + (i < STRIDE_OBJ - 1 ? " && " : ")");
+					checks2 = checks2 + "!("+f2.data[i]+" & level.objects["+idx+"*STRIDE_OBJ+"+i+"])" + (i < STRIDE_OBJ - 1 ? " && " : ")");
+				}
+				var label = "winCondition_loop_"+hintID;
+				switch(condition) {
+					case "no":
+						return [
+							"var "+failed+" = false;",
+							"for(var "+idx+" = 0; "+idx+" < level.n_tiles; "+idx+"++) {",
+							"if(!"+checks1+" && !"+checks2+") {", //target is there and on is there
+							failed+" = true;",
+						].concat(falseA).concat([
+							"break;", //TODO: constructive negation of no X on Y?
+							"}",
+							"}",
+							"if(!"+failed+") {"
+						]).concat(rest(trueA, falseA)).concat([
+							"}"
+						]);
+					case "some":
+						return [
+							"var "+failed+" = true;",
+							"for(var "+idx+" = 0; "+idx+" < level.n_tiles; "+idx+"++) {",
+							"if(!"+checks1+" && !"+checks2+") {", //target is there and on is there
+						].concat(rest([failed+" = false;"].concat(trueA), [])).concat([
+							"}",
+							"}",
+							"if("+failed+") {"
+						]).concat(falseA).concat([
+							"}"
+						]);
+					case "all":
+						return [
+							"var "+failed+" = false;",
+							"for(var "+idx+" = 0; "+idx+" < level.n_tiles; "+idx+"++) {",
+							"if(!"+checks1+" && "+checks2+") {", //target is there and on is _not_ there
+							failed+" = true;",
+						].concat(falseA).concat([
+							"break;", //TODO: constructive negation of all X on Y?
+							"}",
+							"}",
+							"if(!"+failed+") {"
+						]).concat(rest(trueA, falseA)).concat([
+							"}"
+						]);
+					case "at least":
+					case "at most":
+					case "exactly":
+						var count = "winCondition_count_"+hintID;
+						var targetCount = hint.value.count;
+						var countChecks = {
+							"at least":count+" >= "+targetCount,
+							"at most":count+" <= "+targetCount,
+							"exactly":count+" == "+targetCount
+						};
+						return [
+							"var "+count+" = 0;",
+							"for(var "+idx+" = 0; "+idx+" < level.n_tiles; "+idx+"++) {",
+							"if(!"+checks1+" && !"+checks2+") {", //target is there and on is there
+							count+"++;",
+							"}",
+							"}",
+							"if("+countChecks[condition]+") {"
+						]).concat(rest(trueA, falseA)).concat([
+							"} else {"
+						]).concat(falseA).concat([
+							"}"
+						]);
+					default:
+						throw new Error("Unsupported win condition " + hint.value.condition);
+				}
 			case "fire":
 				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			default:
@@ -1077,7 +1100,8 @@ var HintCompiler = (function() {
 		];
 		var generated = codegen(hint,
 			function(tA, fA) { return ["if(si == states.length-1) {"].concat(tA).concat(["} else {"]).concat(fA).concat(["}"]); },
-			["if(!matchFn || !matchFn()) {",
+			[
+				"if(!matchFn || !matchFn()) {",
 				"level.objects = initObjects;",
 				"return true;",
 				"}"

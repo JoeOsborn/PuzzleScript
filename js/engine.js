@@ -1182,7 +1182,6 @@ function Rule(rule) {
 	this.cellRowMatches = [];
 	this.foundMatches = [];
 	this.tryApplyFn = null;
-	this.anyMatchesFn = null;
 	for (var i=0;i<this.patterns.length;i++) {
 		this.cellRowMatches.push(this.generateCellRowMatchesFunction(this.patterns[i],this.isEllipsis[i]));
 		this.foundMatches.push([]);

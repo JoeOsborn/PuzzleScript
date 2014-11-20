@@ -189,7 +189,7 @@ var testRemoteGames = [
 	// "e7f21a1667880eb8aff0", //gifts of the forest
 	// "1a3056782a7e6c0eb1db", //gamlet
 	// "91812deb73f9fa066c9c", //pitman
-	// "b70777227e6fb5d7ad05", //princess of isometria
+	// "dad8138eaa7b7e3c2bc9", //princess of isometria
 	// "eb1666d62c9116c45013", //dot puzzle
 	// "050ead59a13f35c6f4e0", //faced
 	// "8604829", //cops and robbers

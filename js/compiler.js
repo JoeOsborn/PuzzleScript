@@ -506,11 +506,11 @@ function compile2DPattern(lineNo,pat) {
 		functionBody.push("\ti += level.height;");
 	}
 	functionBody.push("\treturn true;");
-
-	global.eval(["function pat2D_match_"+name+"(i0) {"].
-		concat(functionBody).
-		concat(["}"]).
-		join("\n")
+	evalCode(
+		["function pat2D_match_"+name+"(i0) {"].
+			concat(functionBody).
+			concat(["}"]).
+			join("\n")
 	);
 	return global["pat2D_match_"+name];
 }
@@ -2563,17 +2563,17 @@ function loadFile(str) {
 
 	formatHomePage(state);
 
-	delete state.commentLevel;
-	delete state.names;
-	delete state.abbrevNames;
-	delete state.objects_candname;
-	delete state.objects_section;
-	delete state.objects_spritematrix;
-	delete state.section;
-	delete state.subsection;
-	delete state.tokenIndex;
-	delete state.visitedSections;
-	delete state.loops;
+//  delete state.commentLevel;
+// 	delete state.names;
+// 	delete state.abbrevNames;
+// 	delete state.objects_candname;
+// 	delete state.objects_section;
+// 	delete state.objects_spritematrix;
+// 	delete state.section;
+// 	delete state.subsection;
+// 	delete state.tokenIndex;
+// 	delete state.visitedSections;
+// 	delete state.loops;
 	/*
 	var lines = stripComments(str);
 	consolePrint(lines);
@@ -2654,450 +2654,496 @@ function compile(command,text,randomseed) {
 
 var global = this;
 
+function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
+	var dir = rule.direction;
+	var delta = prefix+"delta";
+	var matchChecks = [];
+	var matchLabels = [];
+	var ks = [];
+	var idxs = [];
+	var masks = [];
+
+	var body = ["var "+delta+" = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;"];
+	var post = [];
+	for(var pm = 0; pm < rule.patterns.length; pm++) {
+		if(!(pm in masks)) { masks[pm] = []; }
+		for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
+			masks[pm][idx] = prefix+"mask_"+pm+"_"+idx;
+			body.push("var "+masks[pm][idx]+" = "+rule.cellRowMasks[pm].data[idx]+";");
+		}
+		var maskCheck = "if((";
+		for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
+			maskCheck += "(("+masks[pm][idx]+" & level.mapCellContents.data["+idx+"]) == "+masks[pm][idx]+")";
+			if(idx < rule.cellRowMasks[pm].data.length-1) {
+				maskCheck += " && ";
+			}
+		}
+		maskCheck += ")) {";
+		body.push(maskCheck);
+		post.unshift("}");
+	}
+	for(var p = 0; p < rule.patterns.length; p++) {
+		matchLabels[p] = prefix+"seek_"+p;
+		idxs[p] = prefix+"idx_"+p;
+		var x = prefix+"x_"+p;
+		var y = prefix+"y_"+p;
+		var len = rule.patterns[p].length - (rule.isEllipsis[p] ? 1 : 0);
+
+		var xmin = 0;
+		var ymin = 0;
+		var xmaxDef = "level.width";
+		var ymaxDef = "level.height";
+
+    switch(dir) {
+    	case 1://up
+    	{
+    		ymin+=(len-1);
+    		break;
+    	}
+    	case 2: //down 
+    	{
+				ymaxDef+="-("+len+"-1)";
+				break;
+    	}
+    	case 4: //left
+    	{
+    		xmin+=(len-1);
+    		break;
+    	}
+    	case 8: //right
+			{
+				xmaxDef+="-("+len+"-1)";
+				break;
+			}
+    }
+		var xmax = prefix+"xmax_"+p;
+		var ymax = prefix+"ymax_"+p;
+		body.push("var "+xmax+" = "+xmaxDef+";");
+		body.push("var "+ymax+" = "+ymaxDef+";");
+		var horizontal = dir > 2;
+		if(horizontal) {
+			body.push("for(var "+y+" = "+ymin+"; "+y+" < "+ymax+"; "+y+"++) {");
+			post.unshift("}");
+			var maskCheck = "if(!(";
+			for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
+				maskCheck += "(("+masks[p][idx]+" & level.rowCellContents["+y+"].data["+idx+"]) == "+masks[p][idx]+")";
+				if(idx < rule.cellRowMasks[p].data.length-1) {
+					maskCheck += " && ";
+				}
+			}
+			maskCheck += ")) { continue; }";
+			body.push(maskCheck);
+			body.push(matchLabels[p]+":");
+			body.push("for(var "+x+" = "+xmin+"; "+x+" < "+xmax+"; "+x+"++) {");
+			post.unshift("}");
+		} else {
+			body.push("for(var "+x+" = "+xmin+"; "+x+" < "+xmax+"; "+x+"++) {");
+			post.unshift("}");
+			var maskCheck = "if(!(";
+			for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
+				maskCheck += "(("+masks[p][idx]+" & level.colCellContents["+x+"].data["+idx+"]) == "+masks[p][idx]+")";
+				if(idx < rule.cellRowMasks[p].data.length-1) {
+					maskCheck += " && ";
+				}
+			}
+			maskCheck += ")) { continue; }";
+			body.push(maskCheck);
+			body.push(matchLabels[p]+":");
+			body.push("for(var "+y+" = "+ymin+"; "+y+" < "+ymax+"; "+y+"++) {");
+			post.unshift("}");
+		}
+		body.push("var "+idxs[p]+" = ("+x+" * level.height + "+y+")|0;");
+		var checkFnName = checkFns[p];
+		matchChecks[p] = checkFnName + "("+idxs[p]+")";
+		if(rule.isEllipsis[p]) {
+			var ellipsisLoopLabel = prefix+"seekWildcard_"+p;
+			ks[p] = prefix+"k_"+p;
+			var ellipsisLength = len;
+			var kmax="1";
+			switch(dir) {
+				case 1: //up
+					kmax = y+"-"+ellipsisLength+"+2";
+					break;
+				case 2: //down
+					kmax = "level.height-("+y+"+"+ellipsisLength+")+1";
+					break;
+					
+				case 4: //left
+					kmax = x+"-"+ellipsisLength+"+2";						
+					break;
+				case 8: //right
+					kmax = "level.width-("+x+"+"+ellipsisLength+")+1";	
+					break;
+					
+				default:
+					throw "NO DIRECTION";
+			}
+			var kmaxVar = prefix+"kmax_"+p;
+			body.push("var "+kmaxVar+" = "+kmax);
+			body.push(ellipsisLoopLabel+":");
+			body.push("for(var "+ks[p]+"= 0;"+ks[p]+" < "+kmaxVar+";"+ks[p]+"++) {");
+			matchChecks[p] = checkFnName + "("+idxs[p]+", "+ks[p]+")";
+			matchLabels[p] = ellipsisLoopLabel;
+			post.unshift("}");
+		}
+		if(p == rule.patterns.length-1) {
+			for(var pm = 0; pm < rule.patterns.length; pm++) {
+				body.push("if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
+			}
+			body = body.concat(matchOccurred(prefix, prefix+"delta", idxs, ks));
+		}
+	}
+	return body.concat(post);
+}
+
+function compileMatchFunction(state, fnName, rule, pm) {
+	var pattern = rule.patterns[pm];
+	var dir = rule.direction;
+	var isEllipsis = rule.isEllipsis[pm];
+	var delta = dirMasksDelta[dir];
+	var body = [];
+	body.push("var d = "+delta[1]+"+"+delta[0]+"*level.height;");
+	body.push("var idx = i;");
+	body.push("var movs;");
+	var requiredObjs = [];
+	for(var ci = 0; ci < pattern.length; ci++) {
+		var cell = pattern[ci];
+		if(cell === ellipsisPattern) {
+			body.push("idx += (k-1)*d;");
+		} else {
+			var patternBody = [];
+			for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+				var op = cell.objectsPresent.data[idx];
+				var om = cell.objectsMissing.data[idx];
+				var objectsCheck = "";
+				if(op) {
+					if(op & (op-1)) {
+						objectsCheck += '((objs'+ci+'_'+idx+' & ' + op + ') === ' + op + ')';
+					} else {
+						objectsCheck += '(objs'+ci+'_'+idx+' & ' + op + ')';
+					}
+				}
+				if(om) {
+					if(objectsCheck.length) { objectsCheck += " && "; }
+					objectsCheck += '!(objs'+ci+'_'+idx+'' + ' & ' + om + ')';
+				}
+				if(objectsCheck.length) {
+					requiredObjs.push(idx);
+					patternBody.push("if(!("+objectsCheck+")) { return false; }");
+				}
+			}
+			var anyObjectsCheck = "";
+			for (var any = 0; any < cell.anyObjectsPresent.length; any++) {
+				var anyHere = "";
+				for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+					var aop = cell.anyObjectsPresent[any].data[idx];
+					if(aop) {
+						if(anyHere.length) { anyHere += " | "; }
+						if(requiredObjs.indexOf(idx) == -1) {
+							requiredObjs.push(idx);
+						}
+						anyHere += "(objs"+ci+"_"+idx+" & "+aop+")";
+					}
+				}
+				if(anyObjectsCheck.length) {
+					anyObjectsCheck += " && ";
+				}
+				anyObjectsCheck += "("+anyHere+")";
+			}
+			if(anyObjectsCheck.length) {
+				patternBody.push("if(!("+anyObjectsCheck+")) { return false; }");
+			}
+			
+			for(var idx = 0; idx < STRIDE_MOV; idx++) {
+				var mp = cell.movementsPresent.data[idx];
+				var mm = cell.movementsMissing.data[idx];
+				var movementsCheck = "";
+				if(mp) {
+					if(mp & (mp-1)) {
+						movementsCheck += '((movs & ' + mp + ') === ' + mp + ')';
+					} else {
+						movementsCheck += '(movs & ' + mp + ')';
+					}
+				}
+				if(mm) {
+					if(movementsCheck.length) { movementsCheck += " && "; }
+					movementsCheck += '!(movs' + ' & ' + mm + ')';
+				}
+				if(movementsCheck.length) {
+					patternBody.push("movs = level.movements[idx * "+STRIDE_MOV+" + "+idx+"];");
+					patternBody.push("if(!("+movementsCheck+")) { return false; }");
+				}
+			}
+			for(var required = 0; required < requiredObjs.length; required++) {
+				var idx = requiredObjs[required];
+				patternBody.unshift("var objs"+ci+"_"+idx+" = level.objects[idx * "+STRIDE_OBJ+" + "+idx+"];");
+			}
+			body = body.concat(patternBody);
+		}
+		if(ci < pattern.length-1) {
+			body.push("idx += d;");
+		}
+	}
+	evalCode(
+		"function "+fnName+"(i"+(isEllipsis?", k":"")+") {\n"+
+			body.join("\n") + "\n" +
+			"return true;\n" +
+		"}"
+	);
+	return fnName;
+}
+
+function compileCellReplaceFn(state, name, rule, pm, ci) {
+	var cell = rule.patterns[pm][ci];
+	var body = [];
+	var post = [];
+	var replace = cell.replacement;
+	if(!replace) { return null; }
+	var objectsSet = replace.objectsSet.clone();
+	var objectsClear = replace.objectsClear.clone();
+	var movementsSet = replace.movementsSet.clone();
+	var movementsClear = replace.movementsClear.clone();
+	var objectsClearedInts = [];
+	var objectsSetInts = [];
+	var movementsClearedInts = [];
+	var movementsSetInts = [];
+	var oldCellMaskInts = [];
+	var oldMovementMaskInts = [];
+	body.push("var colIndex=(index/level.height)|0;");
+	body.push("var rowIndex=(index%level.height)|0;");	
+	//TODO: avoid generating code for masks that are always zero. note that this must play nice with random too!	
+	for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+		objectsClearedInts.push("objectsCleared"+idx);
+		body.push("var "+objectsClearedInts[idx]+" = "+replace.objectsClear.data[idx]+";");
+		objectsSetInts.push("objectsSet"+idx);
+		body.push("var "+objectsSetInts[idx]+" = "+replace.objectsSet.data[idx]+";");
+		oldCellMaskInts.push("oldCellMask"+idx);
+		body.push("var "+oldCellMaskInts[idx]+" = level.objects[index*STRIDE_OBJ+"+idx+"];");
+	}
+	for(var idx = 0; idx < STRIDE_MOV; idx++) {
+		movementsClearedInts.push("movementsCleared"+idx);
+		body.push("var "+movementsClearedInts[idx]+" = "+replace.movementsClear.data[idx]+" | "+replace.movementsLayerMask.data[idx]+";");
+		movementsSetInts.push("movementsSet"+idx);
+		body.push("var "+movementsSetInts[idx]+" = "+replace.movementsSet.data[idx]+";");
+		oldMovementMaskInts.push("oldMovementMask"+idx);						
+		body.push("var "+oldMovementMaskInts[idx]+" = level.movements[index*STRIDE_MOV+"+idx+"];");
+	}
+	if(!replace.randomEntityMask.iszero()) {
+		var choices=[];
+		for (var k=0;k<32*STRIDE_OBJ;k++) {
+			if (replace.randomEntityMask.get(k)) {
+				choices.push(k);
+			}
+		}
+		body.push("switch(Math.floor(RandomGen.uniform() * "+choices.length+")) {");
+		for(var k = 0; k < choices.length; k++) {
+			body.push("case "+k+":");
+			var rand = choices[k];
+			var n = state.idDict[rand];
+			var o = state.objects[n];
+			objectsSet.ibitset(rand);
+			objectsClear.ior(state.layerMasks[o.layer]);
+			movementsClear.ishiftor(0x1f, 5 * o.layer);
+			for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+				body.push(objectsClearedInts[idx]+" = "+objectsClear.data[idx]+";");
+				body.push(objectsSetInts[idx]+" = "+objectsSet.data[idx]+";");
+			}
+			for(var idx = 0; idx < STRIDE_MOV; idx++) {
+				body.push(movementsClearedInts[idx]+" = "+movementsClear.data[idx]+";");
+			}
+			body.push("break;");
+			objectsSet = replace.objectsSet.clone();
+			objectsClear = replace.objectsClear.clone();
+			movementsClear = replace.movementsClear.clone();
+		}
+		body.push("}");
+	}
+	if(!replace.randomDirMask.iszero()) {
+		for(var layerIndex=0; layerIndex < state.collisionLayers.length; layerIndex++) {
+			if(replace.randomDirMask.get(5*layerIndex)) {
+				body.push("var randomDirBitPlusOffset"+layerIndex+" = Math.floor(RandomGen.uniform()*4) + "+(5*layerIndex)+";");
+				body.push("switch(randomDirBitPlusOffset"+layerIndex+">>5) {");
+				for(var idx = 0; idx < movementsSetInts.length; idx++) {
+					body.push("case "+idx+":");
+					body.push(movementsSetInts[idx]+" |= (1 << (randomDirBitPlusOffset"+layerIndex+" & 31));");
+					body.push("break;");
+				}
+				body.push("}");
+				body.push(movementsSetInts+"[randomDirBitPlusOffset"+layerIndex+">>5] |= (1 << (randomDirBitPlusOffset"+layerIndex+" & 31));");
+			}
+		}
+	}
+	body.push("var changed = false;");
+	if(rule.isRigid) {
+		var rigidGroupIndex = state.groupNumber_to_RigidGroupIndex[rule.groupNumber];
+		rigidGroupIndex++;
+		var rigidMask = new BitVec(STRIDE_MOV);
+		for(var layer = 0; layer < state.collisionLayers.length; layer++) {
+			rigidMask.ishiftor(rigidGroupIndex, layer*5);
+		}
+		rigidMask.iand(replace.movementsLayerMask);
+		var rigidGroupIndexMaskInts = [];
+		var rigidMovementAppliedMaskInts = [];
+		for(var idx = 0; idx < STRIDE_MOV; idx++) {
+			rigidGroupIndexMaskInts.push("rigidGroupIndexMask"+idx);
+			rigidMovementAppliedMaskInts.push("rigidMovementAppliedMask"+idx);
+			body.push("var "+rigidGroupIndexMaskInts[idx]+" = level.rigidGroupIndexMask[index].data["+idx+"];");
+			body.push("var "+rigidMovementAppliedMaskInts[idx]+" = level.rigidMovementAppliedMask[index].data["+idx+"];");
+			body.push("if(!(("+rigidMask.data[idx]+" & "+rigidGroupIndexMaskInts[idx]+") == "+rigidMask.data[idx]+") && !(("+replace.movementsLayerMask.data[idx]+" & "+rigidMovementAppliedMaskInts[idx]+") == "+replace.movementsLayerMask.data[idx]+")) {");
+			body.push("level.rigidGroupIndexMask[index].data["+idx+"] |= "+rigidMask.data[idx]+";");
+			body.push("level.rigidMovementAppliedMask[index].data["+idx+"] |= "+replace.movementsLayerMask.data[idx]+";");
+			body.push("changed = true;");
+			body.push("}");
+		}
+	}
+	for(var idx = 0; idx < STRIDE_OBJ; idx++) {
+		body.push("level.objects[index*STRIDE_OBJ+"+idx+"] &= ~"+objectsClearedInts[idx]+";");
+		body.push("level.objects[index*STRIDE_OBJ+"+idx+"] |= "+objectsSetInts[idx]+";");
+		body.push("changed = changed || (level.objects[index*STRIDE_OBJ+"+idx+"] !== "+oldCellMaskInts[idx]+");");
+		
+		body.push("level.colCellContents[colIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
+		body.push("level.rowCellContents[rowIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
+		body.push("level.mapCellContents.data["+idx+"] |= "+objectsSetInts[idx]+";");
+		body.push("sfxCreateMask.data["+idx+"] |= level.objects[index*STRIDE_OBJ+"+idx+"] & ~"+oldCellMaskInts[idx]+";");
+		body.push("sfxDestroyMask.data["+idx+"] |= "+oldCellMaskInts[idx]+" & ~level.objects[index*STRIDE_OBJ+"+idx+"];");
+	}
+	for(var idx = 0; idx < STRIDE_MOV; idx++) {
+		body.push("level.movements[index*STRIDE_MOV+"+idx+"] &= ~"+movementsClearedInts[idx]+";");
+		body.push("level.movements[index*STRIDE_MOV+"+idx+"] |= "+movementsSetInts[idx]+";");
+		body.push("changed = changed || (level.movements[index*STRIDE_MOV+"+idx+"] !== "+oldMovementMaskInts[idx]+");");
+	}
+	body.push("return changed;");
+	evalCode(
+		"function "+name+"(index) {\n" +
+			(body.concat(post)).
+			join("\n") +
+		"\n}"
+	);
+	return name;
+}
+
 function compileRules(state,rules,prefix) {
 	for(var i = 0; i < rules.length; i++) {
 		var ruleGroup = rules[i];
 		for(var j = 0; j < ruleGroup.length; j++) {
 			var rule = ruleGroup[j];
-			var ruleMatchedFunction;
-			var tabs = "\t";
-			var dir = rule.direction;
-			var matchChecks = [];
-			var matchLabels = [];
-			var functionBody = [
-				tabs+"var delta = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;",
-				tabs+"var anyMatches = false;"
-			];
-			if(rule.hasReplacements) {
-				functionBody.push(tabs+"var anyApplications = false;");
-			}
+			var cellMatchFns = [];
+			var cellReplaceFns = [];
 			for(var pm = 0; pm < rule.patterns.length; pm++) {
-				for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
-					functionBody.push(tabs+"var mask"+pm+"_"+idx+" = "+rule.cellRowMasks[pm].data[idx]+";");
-				}
-				var maskCheck = tabs+"if(!(";
-				for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
-					maskCheck += "((mask"+pm+"_"+idx+" & level.mapCellContents.data["+idx+"]) == mask"+pm+"_"+idx+")";
-					if(idx < rule.cellRowMasks[pm].data.length-1) {
-						maskCheck += " && ";
-					}
-				}
-				maskCheck += ")) { return false; }";
-				functionBody.push(maskCheck);
-			}
-			var functionPost = [];
-			for(var p = 0; p < rule.patterns.length; p++) {
-				matchLabels[p] = "seek"+p;
-				var loopIndex = "idx"+p;
-				var x = "x"+p;
-				var y = "y"+p;
-				var len = rule.patterns[p].length - (rule.isEllipsis[p] ? 1 : 0);
-				
-				var xmin = 0;
-				var ymin = 0;
-				var xmaxDef = "level.width";
-				var ymaxDef = "level.height";
-
-		    switch(dir) {
-		    	case 1://up
-		    	{
-		    		ymin+=(len-1);
-		    		break;
-		    	}
-		    	case 2: //down 
-		    	{
-						ymaxDef+="-("+len+"-1)";
-						break;
-		    	}
-		    	case 4: //left
-		    	{
-		    		xmin+=(len-1);
-		    		break;
-		    	}
-		    	case 8: //right
-					{
-						xmaxDef+="-("+len+"-1)";
-						break;
-					}
-		    }
-				
-				functionBody.push(tabs+"var xmax"+p+" = "+xmaxDef+";");
-				functionBody.push(tabs+"var ymax"+p+" = "+ymaxDef+";");
-				var mask = "mask"+p;
-				var horizontal = dir > 2;
-				if(horizontal) {
-					functionBody.push(tabs+"for(var "+y+" = "+ymin+"; "+y+" < ymax"+p+"; "+y+"++) {");
-					functionPost.unshift(tabs+"}");
-					var maskCheck = tabs+"\tif(!(";
-					for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
-						maskCheck += "((mask"+p+"_"+idx+" & level.rowCellContents["+y+"].data["+idx+"]) == mask"+p+"_"+idx+")";
-						if(idx < rule.cellRowMasks[p].data.length-1) {
-							maskCheck += " && ";
+				cellMatchFns[pm] = prefix+"match_"+i+"_"+j+"_"+pm;
+				compileMatchFunction(state, cellMatchFns[pm], rule, pm);
+				if(rule.hasReplacements) {
+					cellReplaceFns[pm] = [];
+					for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
+						cellReplaceFns[pm][ci] = prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci;
+						if(!compileCellReplaceFn(state, cellReplaceFns[pm][ci],rule,pm,ci)) {
+							delete cellReplaceFns[pm][ci];
 						}
-					}
-					maskCheck += ")) { continue; }";
-					functionBody.push(maskCheck);
-					functionBody.push(tabs+"\t"+matchLabels[p]+":");
-					functionBody.push(tabs+"\tfor(var "+x+" = "+xmin+"; "+x+" < xmax"+p+"; "+x+"++) {");
-					functionPost.unshift(tabs+"\t}");
-				} else {
-					functionBody.push(tabs+"for(var "+x+" = "+xmin+"; "+x+" < xmax"+p+"; "+x+"++) {");
-					functionPost.unshift(tabs+"}");
-					var maskCheck = tabs+"\tif(!(";
-					for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
-						maskCheck += "((mask"+p+"_"+idx+" & level.colCellContents["+x+"].data["+idx+"]) == mask"+p+"_"+idx+")";
-						if(idx < rule.cellRowMasks[p].data.length-1) {
-							maskCheck += " && ";
-						}
-					}
-					maskCheck += ")) { continue; }";
-					functionBody.push(maskCheck);
-					functionBody.push(tabs+"\t"+matchLabels[p]+":");
-					functionBody.push(tabs+"\tfor(var "+y+" = "+ymin+"; "+y+" < ymax"+p+"; "+y+"++) {");
-					functionPost.unshift(tabs+"\t}");
-				}
-				tabs = tabs + "\t" + "\t";
-				functionBody.push(tabs+"var "+loopIndex+" = ("+x+" * level.height + "+y+")|0;");
-				matchChecks[p] = prefix+"match_"+i+"_"+j+"_"+p+"("+loopIndex+")";
-				if(rule.isEllipsis[p]) {
-					var ellipsisLoopLabel = "seekWildcard"+p;
-					var ellipsisLoopIndex = "k"+p;
-					var ellipsisLength = len;
-					var kmax="1";
-					switch(dir) {
-						case 1: //up
-							kmax = y+"-"+ellipsisLength+"+2";
-							break;
-						case 2: //down
-							kmax = "level.height-("+y+"+"+ellipsisLength+")+1";
-							break;
-							
-						case 4: //left
-							kmax = x+"-"+ellipsisLength+"+2";						
-							break;
-						case 8: //right
-							kmax = "level.width-("+x+"+"+ellipsisLength+")+1";	
-							break;
-							
-						default:
-							throw "NO DIRECTION";
-					}
-					var kmaxVar = "kmax"+p;
-					functionBody.push(tabs+"var "+kmaxVar+" = "+kmax);
-					functionBody.push(tabs+ellipsisLoopLabel+":");
-					functionBody.push(tabs+"for(var "+ellipsisLoopIndex+"= 0;"+ellipsisLoopIndex+" < "+kmaxVar+";"+ellipsisLoopIndex+"++) {");
-					matchChecks[p] = prefix+"match_"+i+"_"+j+"_"+p+"("+loopIndex+","+ellipsisLoopIndex+")";
-					matchLabels[p] = ellipsisLoopLabel;
-					functionPost.unshift(tabs+"}");
-					tabs = tabs + "\t";
-				}
-				if(p == rule.patterns.length-1) {
-					for(var pm = 0; pm < rule.patterns.length; pm++) {
-						functionBody.push(tabs+"if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
-					}
-					ruleMatchedFunction = 
-						"function "+prefix+"rule"+i+"_"+j+"_matches(rule) {\n"+
-							(functionBody.
-								concat([tabs+"return true;"]).
-								concat(functionPost).
-								concat(["\treturn false;"])).
-							join("\n")+
-						"\n}";
-					functionBody.push(tabs+"anyMatches = true;");
-					if(rule.hasReplacements) {
-						functionBody.push(tabs+"var result = false;");
-						functionBody.push(tabs+"var targetIndex = 0|0;");
-						for(var pm = 0; pm < rule.patterns.length; pm++) {
-							var cellIndex = "cellRow"+pm;
-							functionBody.push(tabs+"targetIndex = idx"+pm+";");
-							for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
-								if(rule.patterns[pm][ci] === ellipsisPattern) {
-									functionBody.push(tabs+"targetIndex += delta * k"+pm+";");
-								} else {
-									functionBody.push(tabs+"result = "+prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci+"(targetIndex) || result;");
-									if(ci < rule.patterns[pm].length-1) {
-										functionBody.push(tabs+"targetIndex += delta;");
-									}
-								}
-							}
-						}
-						if(verbose_logging) {
-							functionBody.push(tabs+"if(result) { consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[dir] + " applied.</font>'); }");
-						}
-						functionBody.push(tabs+"if(result && applyAtWatchers) {");
-						functionBody.push(tabs+"\tfor(var w = 0; w < applyAtWatchers.length; w++) {");
-						functionBody.push(tabs+"\t\tapplyAtWatchers[w](rule,"+i+","+j+","+dir+");");
-						functionBody.push(tabs+"\t}");
-						functionBody.push(tabs+"}");
-						functionBody.push(tabs+"anyApplications = result || anyApplications;");
 					}
 				}
 			}
+			var functionBody = [
+				"var anyMatches = false;",
+				(rule.hasReplacements ? "var anyApplications = false;" : "")
+			].concat(generateMatchLoops("", rule, cellMatchFns, 
+				function matchOccurred(_prefix, delta, indices, ks) {
+					return [
+				  	"anyMatches = true;"
+				  ].
+					concat(rule.hasReplacements ? 
+						[
+				    	"var result = false;",
+				    	"var targetIndex = 0|0;"
+				    ].concat([].concat.apply([],rule.patterns.map(function(pattern, pm, _) {
+				    	var ci = "cellRow"+pm;
+				    	return [
+					  		"targetIndex = "+indices[pm]+";"
+					  	].concat([].concat.apply([],pattern.map(function(cell, ci, _) {
+				    		return cell === ellipsisPattern ? 
+					  			["targetIndex += "+delta+" * "+ks[pm]+";"] :
+					  			[
+					  				cell.replacement ? "result = "+cellReplaceFns[pm][ci]+"(targetIndex) || result;" : "",
+					  				(ci < pattern.length-1) ? "targetIndex += "+delta+";" : ""
+					  			]
+				    	})));
+				    }))).concat("anyApplications = result || anyApplications;") :
+						[]
+					).
+					concat(verbose_logging ?
+						[
+							(rule.hasReplacements ? "if(result) {":""),
+							"consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[rule.direction] + " applied.</font>');",
+					   	(rule.hasReplacements ? "}":"")
+						] :
+						[]
+					).concat([
+						"if("+(rule.hasReplacements?"result && ":"")+"applyAtWatchers) {",
+						"for(var w = 0; w < applyAtWatchers.length; w++) {",
+						"applyAtWatchers[w](rule,"+i+","+j+","+rule.direction+");",
+						"}",
+						"}"
+					]);
+				}
+			));
 			var queueCommands = [];
 			if(rule.commands && rule.commands.length) {
-				queueCommands.push("\tif(anyMatches) {");
+				queueCommands.push("if(anyMatches) {");
 				for(var c=0;c<rule.commands.length;c++) {
 					var cmd = rule.commands[c];
-					queueCommands.push("\t\tcmd_"+cmd[0]+" = true;");
-					if(cmd[0] == "message") { queueCommands.push("\t\tmessagetext = \""+cmd[1].replace(/\"/g,"\\\"")+"\";"); }
+					queueCommands.push("cmd_"+cmd[0]+" = true;");
+					if(cmd[0] == "message") { queueCommands.push("messagetext = \""+cmd[1].replace(/\"/g,"\\\"")+"\";"); }
 					if(verbose_logging) {
 						var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
-						queueCommands.push("\t\tconsolePrint('"+logMessage+"');");
+						queueCommands.push("consolePrint('"+logMessage+"');");
 					}
 				}
-				queueCommands.push("\t}");
+				queueCommands.push("}");
 			}
 			var ruleFunction = 
 				"function "+prefix+"rule"+i+"_"+j+"(rule) {\n"+
 					(functionBody.
-						concat(functionPost).
 						concat(queueCommands).
-						concat(rule.hasReplacements ? ["\treturn anyApplications;"] : ["\treturn false;"])).
+						concat(rule.hasReplacements ? ["return anyApplications;"] : ["return false;"])).
 					join("\n")+
 				"\n}";
-			var cellReplaceFunctions = [];
-			for(var pm = 0; pm < rule.patterns.length; pm++) {
-				for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
-					var cell = rule.patterns[pm][ci];
-					var replaceFunctionBody = [];
-					var replaceFunctionPost = [];
-					tabs = "\t";
-					var replace = cell.replacement;
-					if(!replace) { continue; }
-					var objectsSet = replace.objectsSet.clone();
-					var objectsClear = replace.objectsClear.clone();
-					var movementsSet = replace.movementsSet.clone();
-					var movementsClear = replace.movementsClear.clone();
-					var objectsClearedInts = [];
-					var objectsSetInts = [];
-					var movementsClearedInts = [];
-					var movementsSetInts = [];
-					var oldCellMaskInts = [];
-					var oldMovementMaskInts = [];
-					replaceFunctionBody.push(tabs+"var colIndex=(index/level.height)|0;");
-					replaceFunctionBody.push(tabs+"var rowIndex=(index%level.height)|0;");	
-					//TODO: avoid generating code for masks that are always zero. note that this must play nice with random too!	
-					for(var idx = 0; idx < STRIDE_OBJ; idx++) {
-						objectsClearedInts.push("objectsCleared"+idx);
-						replaceFunctionBody.push(tabs+"var "+objectsClearedInts[idx]+" = "+replace.objectsClear.data[idx]+";");
-						objectsSetInts.push("objectsSet"+idx);
-						replaceFunctionBody.push(tabs+"var "+objectsSetInts[idx]+" = "+replace.objectsSet.data[idx]+";");
-						oldCellMaskInts.push("oldCellMask"+idx);
-						replaceFunctionBody.push(tabs+"var "+oldCellMaskInts[idx]+" = level.objects[index*STRIDE_OBJ+"+idx+"];");
-					}
-					for(var idx = 0; idx < STRIDE_MOV; idx++) {
-						movementsClearedInts.push("movementsCleared"+idx);
-						replaceFunctionBody.push(tabs+"var "+movementsClearedInts[idx]+" = "+replace.movementsClear.data[idx]+" | "+replace.movementsLayerMask.data[idx]+";");
-						movementsSetInts.push("movementsSet"+idx);
-						replaceFunctionBody.push(tabs+"var "+movementsSetInts[idx]+" = "+replace.movementsSet.data[idx]+";");
-						oldMovementMaskInts.push("oldMovementMask"+idx);						
-						replaceFunctionBody.push(tabs+"var "+oldMovementMaskInts[idx]+" = level.movements[index*STRIDE_MOV+"+idx+"];");
-					}
-					if(!replace.randomEntityMask.iszero()) {
-						var choices=[];
-						for (var k=0;k<32*STRIDE_OBJ;k++) {
-							if (replace.randomEntityMask.get(k)) {
-								choices.push(k);
-							}
-						}
-						replaceFunctionBody.push(tabs+"switch(Math.floor(RandomGen.uniform() * "+choices.length+")) {");
-						for(var k = 0; k < choices.length; k++) {
-							replaceFunctionBody.push(tabs+"\tcase "+k+":");
-							var rand = choices[k];
-							var n = state.idDict[rand];
-							var o = state.objects[n];
-							objectsSet.ibitset(rand);
-							objectsClear.ior(state.layerMasks[o.layer]);
-							movementsClear.ishiftor(0x1f, 5 * o.layer);
-							for(var idx = 0; idx < STRIDE_OBJ; idx++) {
-								replaceFunctionBody.push(tabs+"\t\t"+objectsClearedInts[idx]+" = "+objectsClear.data[idx]+";");
-								replaceFunctionBody.push(tabs+"\t\t"+objectsSetInts[idx]+" = "+objectsSet.data[idx]+";");
-							}
-							for(var idx = 0; idx < STRIDE_MOV; idx++) {
-								replaceFunctionBody.push(tabs+"\t\t"+movementsClearedInts[idx]+" = "+movementsClear.data[idx]+";");
-							}
-							replaceFunctionBody.push(tabs+"\t\tbreak;");
-							objectsSet = replace.objectsSet.clone();
-							objectsClear = replace.objectsClear.clone();
-							movementsClear = replace.movementsClear.clone();
-						}
-						replaceFunctionBody.push(tabs+"}");
-					}
-					if(!replace.randomDirMask.iszero()) {
-						for(var layerIndex=0; layerIndex < state.collisionLayers.length; layerIndex++) {
-							if(replace.randomDirMask.get(5*layerIndex)) {
-								replaceFunctionBody.push(tabs+"var randomDirBitPlusOffset"+layerIndex+" = Math.floor(RandomGen.uniform()*4) + "+(5*layerIndex)+";");
-								replaceFunctionBody.push(tabs+"switch(randomDirBitPlusOffset"+layerIndex+">>5) {");
-								for(var idx = 0; idx < movementsSetInts.length; idx++) {
-									replaceFunctionBody.push(tabs+"\tcase "+idx+":");
-									replaceFunctionBody.push(tabs+"\t\t"+movementsSetInts[idx]+" |= (1 << (randomDirBitPlusOffset"+layerIndex+" & 31));");
-									replaceFunctionBody.push(tabs+"\t\tbreak;");
-								}
-								replaceFunctionBody.push(tabs+"}");
-								replaceFunctionBody.push(tabs+movementsSetInts+"[randomDirBitPlusOffset"+layerIndex+">>5] |= (1 << (randomDirBitPlusOffset"+layerIndex+" & 31));");
-							}
-						}
-					}
-					replaceFunctionBody.push(tabs+"var changed = false;");
-					if(rule.isRigid) {
-						var rigidGroupIndex = state.groupNumber_to_RigidGroupIndex[rule.groupNumber];
-						rigidGroupIndex++;
-						var rigidMask = new BitVec(STRIDE_MOV);
-						for(var layer = 0; layer < state.collisionLayers.length; layer++) {
-							rigidMask.ishiftor(rigidGroupIndex, layer*5);
-						}
-						rigidMask.iand(replace.movementsLayerMask);
-						var rigidGroupIndexMaskInts = [];
-						var rigidMovementAppliedMaskInts = [];
-						for(var idx = 0; idx < STRIDE_MOV; idx++) {
-							rigidGroupIndexMaskInts.push("rigidGroupIndexMask"+idx);
-							rigidMovementAppliedMaskInts.push("rigidMovementAppliedMask"+idx);
-							replaceFunctionBody.push(tabs+"var "+rigidGroupIndexMaskInts[idx]+" = level.rigidGroupIndexMask[index].data["+idx+"];");
-							replaceFunctionBody.push(tabs+"var "+rigidMovementAppliedMaskInts[idx]+" = level.rigidMovementAppliedMask[index].data["+idx+"];");
-							replaceFunctionBody.push(tabs+"if(!(("+rigidMask.data[idx]+" & "+rigidGroupIndexMaskInts[idx]+") == "+rigidMask.data[idx]+") && !(("+replace.movementsLayerMask.data[idx]+" & "+rigidMovementAppliedMaskInts[idx]+") == "+replace.movementsLayerMask.data[idx]+")) {");
-							replaceFunctionBody.push(tabs+"\tlevel.rigidGroupIndexMask[index].data["+idx+"] |= "+rigidMask.data[idx]+";");
-							replaceFunctionBody.push(tabs+"\tlevel.rigidMovementAppliedMask[index].data["+idx+"] |= "+replace.movementsLayerMask.data[idx]+";");
-							replaceFunctionBody.push(tabs+"\tchanged = true;");
-							replaceFunctionBody.push(tabs+"}");
-						}
-					}
-					for(var idx = 0; idx < STRIDE_OBJ; idx++) {
-						replaceFunctionBody.push(tabs+"level.objects[index*STRIDE_OBJ+"+idx+"] &= ~"+objectsClearedInts[idx]+";");
-						replaceFunctionBody.push(tabs+"level.objects[index*STRIDE_OBJ+"+idx+"] |= "+objectsSetInts[idx]+";");
-						replaceFunctionBody.push(tabs+"changed = changed || (level.objects[index*STRIDE_OBJ+"+idx+"] !== "+oldCellMaskInts[idx]+");");
-						
-						replaceFunctionBody.push(tabs+"level.colCellContents[colIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
-						replaceFunctionBody.push(tabs+"level.rowCellContents[rowIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
-						replaceFunctionBody.push(tabs+"level.mapCellContents.data["+idx+"] |= "+objectsSetInts[idx]+";");
-						replaceFunctionBody.push(tabs+"sfxCreateMask.data["+idx+"] |= level.objects[index*STRIDE_OBJ+"+idx+"] & ~"+oldCellMaskInts[idx]+";");
-						replaceFunctionBody.push(tabs+"sfxDestroyMask.data["+idx+"] |= "+oldCellMaskInts[idx]+" & ~level.objects[index*STRIDE_OBJ+"+idx+"];");
-					}
-					for(var idx = 0; idx < STRIDE_MOV; idx++) {
-						replaceFunctionBody.push(tabs+"level.movements[index*STRIDE_MOV+"+idx+"] &= ~"+movementsClearedInts[idx]+";");
-						replaceFunctionBody.push(tabs+"level.movements[index*STRIDE_MOV+"+idx+"] |= "+movementsSetInts[idx]+";");
-						replaceFunctionBody.push(tabs+"changed = changed || (level.movements[index*STRIDE_MOV+"+idx+"] !== "+oldMovementMaskInts[idx]+");");
-					}
-					replaceFunctionBody.push(tabs+"return changed;");
-					cellReplaceFunctions.push(
-						"function "+prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci+"(index) {\n" +
-							(replaceFunctionBody.
-								concat(replaceFunctionPost)).
-							join("\n") +
-						"\n}"
-					);
-				}
-			}
-			var matchFunctions = [];
-			for(var pm = 0; pm < rule.patterns.length; pm++) {
-				var isEllipsis = rule.isEllipsis[pm];
-				var fnName = prefix+"match_"+i+"_"+j+"_"+pm;
-				var delta = dirMasksDelta[dir];
-				var tabs = "\t";
-				var matchFunctionBody = [];
-				matchFunctionBody.push(tabs+"var d = "+delta[1]+"+"+delta[0]+"*level.height;");
-				matchFunctionBody.push(tabs+"var idx = i;");
-				matchFunctionBody.push(tabs+"var movs;");
-				var requiredObjs = [];
-				for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
-					var cell = rule.patterns[pm][ci];
-					if(cell === ellipsisPattern) {
-						matchFunctionBody.push(tabs+"idx += (k-1)*d;");
-					} else {
-						var patternBody = [];
-						for(var idx = 0; idx < STRIDE_OBJ; idx++) {
-							var op = cell.objectsPresent.data[idx];
-							var om = cell.objectsMissing.data[idx];
-							var objectsCheck = "";
-							if(op) {
-								if(op & (op-1)) {
-									objectsCheck += '((objs'+ci+'_'+idx+' & ' + op + ') === ' + op + ')';
-								} else {
-									objectsCheck += '(objs'+ci+'_'+idx+' & ' + op + ')';
-								}
-							}
-							if(om) {
-								if(objectsCheck.length) { objectsCheck += " && "; }
-								objectsCheck += '!(objs'+ci+'_'+idx+'' + ' & ' + om + ')';
-							}
-							if(objectsCheck.length) {
-								requiredObjs.push(idx);
-								patternBody.push(tabs+"if(!("+objectsCheck+")) { return false; }");
-							}
-						}
-						var anyObjectsCheck = "";
-						for (var any = 0; any < cell.anyObjectsPresent.length; any++) {
-							var anyHere = "";
-							for(var idx = 0; idx < STRIDE_OBJ; idx++) {
-								var aop = cell.anyObjectsPresent[any].data[idx];
-								if(aop) {
-									if(anyHere.length) { anyHere += " | "; }
-									if(requiredObjs.indexOf(idx) == -1) {
-										requiredObjs.push(idx);
-									}
-									anyHere += "(objs"+ci+"_"+idx+" & "+aop+")";
-								}
-							}
-							if(anyObjectsCheck.length) {
-								anyObjectsCheck += " && ";
-							}
-							anyObjectsCheck += "("+anyHere+")";
-						}
-						if(anyObjectsCheck.length) {
-							patternBody.push("if(!("+anyObjectsCheck+")) { return false; }");
-						}
-						
-						for(var idx = 0; idx < STRIDE_MOV; idx++) {
-							var mp = cell.movementsPresent.data[idx];
-							var mm = cell.movementsMissing.data[idx];
-							var movementsCheck = "";
-							if(mp) {
-								if(mp & (mp-1)) {
-									movementsCheck += '((movs & ' + mp + ') === ' + mp + ')';
-								} else {
-									movementsCheck += '(movs & ' + mp + ')';
-								}
-							}
-							if(mm) {
-								if(movementsCheck.length) { movementsCheck += " && "; }
-								movementsCheck += '!(movs' + ' & ' + mm + ')';
-							}
-							if(movementsCheck.length) {
-								patternBody.push(tabs+"movs = level.movements[idx * "+STRIDE_MOV+" + "+idx+"];");
-								patternBody.push(tabs+"if(!("+movementsCheck+")) { return false; }");
-							}
-						}
-						for(var required = 0; required < requiredObjs.length; required++) {
-							var idx = requiredObjs[required];
-							patternBody.unshift(tabs+"var objs"+ci+"_"+idx+" = level.objects[idx * "+STRIDE_OBJ+" + "+idx+"];");
-						}
-						matchFunctionBody = matchFunctionBody.concat(patternBody);
-					}
-					if(ci < rule.patterns[pm].length-1) {
-						matchFunctionBody.push(tabs+"idx += d;");
-					}
-				}
-				matchFunctions.push(
-					"function "+fnName+"(i"+(isEllipsis?", k":"")+") {\n"+
-						matchFunctionBody.join("\n") + "\n" +
-						"\treturn true;" +
-					"\n}"
-				);
-			}
-			try {
-				global.eval(
-					ruleMatchedFunction + "\n" +
-					ruleFunction + "\n" +
-					cellReplaceFunctions.join("\n") + "\n" + 
-					matchFunctions.join("\n") + "\n"
-				);
-				rule.anyMatchesFn = global[prefix+"rule"+i+"_"+j+"_matches"];
-				rule.tryApplyFn = global[prefix+"rule"+i+"_"+j];
-			} catch(e) {
-				console.log("failed! "+e);
-				throw e;
-			}
+			evalCode(ruleFunction);
+			//the matchFunctions and replaceFunctions are already compiled
+			rule.tryApplyFn = global[prefix+"rule"+i+"_"+j];
 		}
 	}
+}
+
+function evalCode(code) {
+	try {
+		global.eval(prettify(code + "\n"));
+	} catch(e) {
+		console.log("compiling\n"+prettify(code)+"\n-----failed! "+e);
+		throw e;
+	}
+}
+
+function prettify(str) {
+	var tabs = "";
+	var lines = str.split("\n");
+	var li = 0;
+	do {
+		var line = lines[li].trim();
+		if(line.length == 0) {
+			lines.splice(li,1);
+			//try again
+		} else {
+			if(line.indexOf("}") == 0) {
+				tabs = tabs.substr(0, tabs.length-1);
+			}
+			line = tabs + line;
+			lines[li] = line;
+			if(line.indexOf("{") == line.length-1) {
+				tabs = tabs + "\t";
+			}
+			li++;
+		}
+	} while(li < lines.length);
+	return lines.join("\n");
 }
 
 function qualifyURL(url) {

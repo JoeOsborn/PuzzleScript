@@ -507,7 +507,6 @@ var HintCompiler = (function() {
 				}
 				var endPos = {line:pos.line+preMapLines+lines.length, ch:0};
 				return {type:"pattern2D", metatype:"predicate", value:{
-					//check:compile2DPattern(firstRealLinePos.line, realLines),
 					pattern:realLines
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
@@ -545,13 +544,16 @@ var HintCompiler = (function() {
 				rulesToMask(fakeState);
 				arrangeRulesByGroupNumber(fakeState);
 				collapseRules(fakeState.rules);
-				if(fakeState.ruleGroups.length > 1) {
+				if(fakeState.rules.length > 1) {
 					throw new Error("More rule groups than expected!");
 				}
+				for(var i = 0; i < fakeState.rules[0].length; i++) {
+					if(fakeState.rules[0][i].patterns.length != 1) {
+						throw new Error("A 1D pattern had more than one pattern!");
+					}
+				}
 				return {type:"pattern1D", metatype:"predicate", value:{
-					//compileRules(fakeState, fakeState.rules, "hint_"+pos.line+"_"+pos.ch);
-					//check:function() { return fakeState.rules[0].anyMatchesFn(fakeState.rules[0]); },
-					rule:fakeState.rules[0]
+					rules:fakeState.rules[0]
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok, stream) {
@@ -761,21 +763,14 @@ var HintCompiler = (function() {
 				}
 				var result = ["var "+anyPassed+" = false;",store];
 				for(var i = 0; i < disjuncts.length; i++) {
-					var thisFailed = "thisFailed_"+hintID+"_"+i;
-					// var thisFailedD = false;
 					// D
-					// 	rest
-					// 	thisFailedD = true
-					// anyPassed = anyPassed || !thisFailedD
+					// 	rest --> passed=true
 					// unwind
-					result = result.concat([
-						"var "+thisFailed+" = false;"
-					]).concat(codegen(disjuncts[i],rest,trueA,[thisFailed+" = true;"])).concat([
-						anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+					result = result.concat(codegen(disjuncts[i],rest,[anyPassed+" = true;"].concat(trueA),[])).concat([
 						isTemporal(disjuncts[i]) ? unwind : ""
 					])
 				}
-				// if(!anyPassed) {
+				// if(!passed) {
 				// 	falseA
 				// }
 				result = result.concat(["if(!"+anyPassed+") {"]).concat(falseA).concat(["}"]);
@@ -810,8 +805,6 @@ var HintCompiler = (function() {
 								//consume 0 or more steps
 								var si0 = "si0_"+hintID+"_"+i;
 								var anyPassed = "anyPassed_"+hintID+"_"+i;
-								var thisFailed = "thisFailed_"+hintID+"_"+i;
-								var track = [thisFailed+" = true;"];
 								var label = "loopEllipses_"+hintID+"_"+i;
 								var minLength = hint.value.minLength;
 								var maxLength = hint.value.maxLength;
@@ -822,10 +815,8 @@ var HintCompiler = (function() {
 										"var "+ellipsesEnd+" = "+(maxLength == Number.MAX_VALUE ? "states.length-1" : "si+"+maxLength)+";",
 										label+":",
 										"do {",
-										"var "+thisFailed+" = false;",
 										storeStateStmt(si0),
-									].concat(thenRest(i+1)(tA,track)).concat([
-										anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+									].concat(thenRest(i+1)([anyPassed+" = true;"].concat(tA),[])).concat([
 										unwindStateStmt(si0+" + 1",["continue "+label+";"],["break "+label+";"]),
 										"} while(si <= "+ellipsesEnd+");",
 										"if(!"+anyPassed+") {"
@@ -872,7 +863,7 @@ var HintCompiler = (function() {
 				label
 				do {
 					store
-					g(B,rest,trueA,[thisFailed=true])
+					g(B,rest,passed=true&trueA,[])
 					unwind
 					g(A,fn(t,f){t},[step, continue label],[break label])
 				} while(si < steps.length);
@@ -882,17 +873,13 @@ var HintCompiler = (function() {
 				*/
 				var si0 = "si0_"+hintID;
 				var anyPassed = "anyPassed_"+hintID;
-				var thisFailed = "thisFailed_"+hintID;
-				var track = [thisFailed+" = true;"];
 				var label = "loopUntil_"+hintID;
 				return [
 					"var "+anyPassed+" = false;",
 					label+":",
 					"do {",
-					"var "+thisFailed+" = false;",
 					storeStateStmt(si0),
-				].concat(codegen(h1,rest,trueA,track)).concat([
-					anyPassed+" = "+anyPassed+" || !"+thisFailed+";",
+				].concat(codegen(h1,rest,[anyPassed+" = true;"].concat(trueA),[])).concat([
 					unwindStateStmt(si0)
 				]).concat(
 					codegen(h0,function(tA,fA){return tA;},
@@ -968,8 +955,22 @@ var HintCompiler = (function() {
 						return evaluatePredicate(["result = states[si].step == "+hint.value.inputDir+";"], rest, trueA, falseA);
 				}			
 			case "pattern1D":
-				throw new Error("Unsupported hint type (yet!) " + hint.type);
+				var anyTrue = "p1d_anyTrue_"+hintID;
+				var checks = ["var "+anyTrue+" = false;"];
+				for(var i = 0; i < hint.value.rules.length; i++) {
+					var rule = hint.value.rules[i];
+					//We know that these kinds have rule have only one pattern.
+					var matchFn = "hint_"+hint.range.start.line+"_"+hintID+"_p1d_match_"+i;
+					compileMatchFunction(state, matchFn, rule, 0);
+					checks = checks.concat(generateMatchLoops("p1d_"+hintID+"_"+i+"_",rule,[matchFn],
+						function occ(_prefix, _rule, _indices, _ks) {
+							return rest([anyTrue+" = true;"].concat(trueA), []);
+						}
+					));
+				}
+				return checks.concat(["if(!"+anyTrue+") {"]).concat(falseA).concat(["}"]);
 			case "pattern2D":
+				//TODO: this			
 				throw new Error("Unsupported hint type (yet!) " + hint.type);
 			case "winCondition":
 				var idx = "winCondition_i_"+hintID;
@@ -1043,7 +1044,7 @@ var HintCompiler = (function() {
 							"}",
 							"}",
 							"if("+countChecks[condition]+") {"
-						]).concat(rest(trueA, falseA)).concat([
+						].concat(rest(trueA, falseA)).concat([
 							"} else {"
 						]).concat(falseA).concat([
 							"}"
@@ -1056,30 +1057,6 @@ var HintCompiler = (function() {
 			default:
 				throw new Error("Unsupported hint type " + hint.type);
 		}
-	}
-	
-	function prettify(str) {
-		var tabs = "";
-		var lines = str.split("\n");
-		var li = 0;
-		do {
-			var line = lines[li].trim();
-			if(line.length == 0) {
-				lines.splice(li,1);
-				//try again
-			} else {
-				if(line.indexOf("}") == line.length-1 || line.indexOf("}") == 0) {
-					tabs = tabs.substr(0, tabs.length-1);
-				}
-				line = tabs + line;
-				lines[li] = line;
-				if(line.indexOf("{") == line.length-1) {
-					tabs = tabs + "\t";
-				}
-				li++;
-			}
-		} while(li < lines.length);
-		return lines.join("\n");
 	}
 	
 	module.compileHintBody = function compileHintBody(str,pos) {
@@ -1109,12 +1086,7 @@ var HintCompiler = (function() {
 			[]
 		);
 		var hintFn = prettify(["function hint_"+pos.line+"(states, matchFn) {","console.log('hint');"].concat(hintFnPre).concat(generated).concat(hintFnPost).join("\n"));
-		try {
-			global.eval(hintFn+"\n");
-		} catch(e) {
-			console.log(hintFn);
-			throw e;
-		}
+		evalCode(hintFn);
 		result.hint = {
 			match:global["hint_"+pos.line]
 		};

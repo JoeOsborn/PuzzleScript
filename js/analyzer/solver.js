@@ -95,14 +95,8 @@ var Solver = (function() {
 		winning=false;
 		restoreLevel(module.INIT_LEVEL);
 		//run prefix
-		var again = 0;
 		for(var i = 0; i < prefix.length; i++) {
-			processInput(prefix[i],false,false,null,false,true);
-			while(againing && again <= AGAIN_LIMIT) {
-				processInput(-1,false,false,null,false,true);
-				//TODO: detect loops
-				again++;
-			}
+			runCompleteStep(prefix[i]);
 		}
 		unregisterApplyAtWatcher(ruleApplied);
 		storedRuleCounts = null;

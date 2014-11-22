@@ -614,7 +614,7 @@ var SolverCautious = (function() {
 			return existingN;
 		}		
 		//actually make a node data structure
-		var h = calculateH()*hDiscount;
+		var h = (hDiscount > 0 ? calculateH()*hDiscount : 0);
 		var n = {
 			id:nodeId,
 			actions:ACTIONS.slice(),
@@ -711,8 +711,10 @@ var SolverCautious = (function() {
 	var abs = Math.abs;
 
 	function calculateH() {
-		if(hDiscount <= 0 || state.winconditions.length==0) { return 0; }
+		if(state.winconditions.length==0) { return 0; }
 		var h = 0;
+		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
+		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
 		for (var wcIndex=0;wcIndex<state.winconditions.length;wcIndex++) {
 			var wincondition = state.winconditions[wcIndex];
 			var filter1 = wincondition[1]; //"X"; if univ, will always pass
@@ -764,6 +766,7 @@ var SolverCautious = (function() {
 							//an X on a non-Y. where is the nearest Y?
 							if ((!filter1.bitsClearInArray(cell.data)) &&
 									(filter2.bitsClearInArray(cell.data))) {
+								//TODO: should we ignore nearby Ys that are already on Xs?
 								var nearest = findNearest(filter2,i);
 								if(nearest != -1) {
 									//there's a y somewhere.
@@ -787,6 +790,7 @@ var SolverCautious = (function() {
 		}
 		return h/state.winconditions.length;
 	}
+	module.calculateH = calculateH;
 	function distance(i,j) {
 		var ix = (i / level.height)|0;
 		var iy = i - ix*level.height;

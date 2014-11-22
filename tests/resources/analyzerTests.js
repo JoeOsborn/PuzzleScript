@@ -392,7 +392,6 @@ function testGame(code, cb) {
 var TIME_BUDGET = 30*1000; //30 seconds, in ms
 
 function testGameLevel(code, lev) {
-	SolverCautious.ITERS_PER_CONTINUATION = 1000;
 	QUnit.test("Game:\""+state.metadata.title+"\", level:"+lev, function(assert) {
 		expect(1);
 		var solutions = [];

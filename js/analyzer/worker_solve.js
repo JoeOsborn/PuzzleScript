@@ -15,7 +15,7 @@ importScripts(
 	"../compiler.js"
 );
 
-importScripts("solver_cautious.js", "solver_free_move.js");
+importScripts("solver_cautious.js");//, "solver_free_move.js");
 importScripts("solver.js");
 
 /*

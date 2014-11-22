@@ -668,6 +668,9 @@ function checkKey(e,justPressed) {
             } else {
                 pushInput(inputdir);
                 if (processInput(inputdir)) {
+                    if(verbose_logging && (typeof SolverCautious != "undefined")) { 
+                        consolePrint("H:"+SolverCautious.calculateH()); 
+                    }
                     redraw();
                 }
 	        }
@@ -689,6 +692,9 @@ function update() {
     if (againing) {
         if (timer>againinterval&&messagetext.length==0) {
             if (processInput(-1)) {
+                if(verbose_logging && (typeof SolverCautious != "undefined")) { 
+                    consolePrint("H:"+SolverCautious.calculateH()); 
+                }
                 redraw();
                 keyRepeatTimer=0;
                 autotick=0;
@@ -735,6 +741,9 @@ function update() {
             autotick=0;
             pushInput("tick");
             if (processInput(-1)) {
+                if(verbose_logging && (typeof SolverCautious != "undefined")) { 
+                    consolePrint("H:"+SolverCautious.calculateH()); 
+                }
                 redraw();
             }
         }

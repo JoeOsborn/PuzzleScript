@@ -1,4 +1,4 @@
-//TODO:consider a functional rephrasing where each node calls a function to check the remainder of the sequence. might be simpler, inliner might be able to deal with it.
+//TODO:consider a codegen rephrasing with subroutines where each node calls a function to check the remainder of the sequence. might be simpler, inliner might be able to deal with it.
 
 var global = this;
 
@@ -25,8 +25,8 @@ var HintCompiler = (function() {
 	//input: up or down or left or right or act
 	//any: up or down or left or right or act or wait
 	var directionRE = /^(up|down|left|right|\^|\>|\<|v|moving|action|x|input|wait|any)\b/i;
-	//(at Pos)? 2d ...
-	var pattern2DRE = /^(2d\s*\n)((?:\s*\S+\s*\n)+)\n/i;
+	//(at Pos)? 2d (...)
+	var pattern2DRE = /^(2d\s*\(\s*)((.|\s)+)(\s*)\)\s*d2/i;
 	//(at Pos)? Dir? [rule]
 	var pattern1DRE = /^(?:(up|down|left|right|horizontal|vertical)\b)?\[([^\]]*)\]/i;
 
@@ -495,20 +495,23 @@ var HintCompiler = (function() {
 				if(!match) { return null; }
 				var preMapLines = match[1].split("\n").length-1;
 				//TODO: check that any prefix of spaces is equal on all lines?
-				var lines = match[2].split("\n").map(function(levLine) { return levLine.trim(); });
+				var rawLines = match[2].split("\n");
+				var lines = rawLines.map(function(levLine) { return levLine.trim(); });
 				var firstRealLine, firstRealLinePos;
 				var realLines = [];
 				for(var l = 0; l < lines.length; l++) {
 					if(lines[l] == "") { continue; }
 					if(!firstRealLine) { firstRealLine = lines[l]; }
-					var linePos = {line:pos.line+l+preMapLines,ch:0};
+					var linePos = {line:pos.line+l+preMapLines,ch:rawLines[l].indexOf(lines[l].charAt(0))};
 					firstRealLinePos = linePos;
 					realLines.push(l);
 					if(lines[l].length != firstRealLine.length) {
 						throw new Error("Invalid 2d pattern: "+lines[l]+"("+linePos+") of length "+lines[l].length+"; should have length "+firstRealLine.length+" to match first line "+firstRealLine+" ("+firstRealLinePos+")");
 					}
 				}
-				var endPos = {line:pos.line+preMapLines+lines.length, ch:0};
+				var allLines = match[0].split("\n");
+				var lastLine = allLines[allLines.length-1];
+				var endPos = {line:pos.line+allLines.length-1, ch:lastLine.length-1};
 				return {type:"pattern2D", metatype:"predicate", value:{
 					pattern:realLines
 				}, range:{start:pos,end:endPos}, length:match[0].length};

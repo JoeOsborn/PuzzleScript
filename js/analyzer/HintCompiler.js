@@ -9,23 +9,22 @@ var HintCompiler = (function() {
 	var finishedRE = /^finished\b/i;
 	var ellipsesRE = /^([0-9]+)?\.\.\.(infinity|[0-9]+)?(?=\s|\))/;
 	
-	var thenRE = /^then\b/i;
+	var thenRE = /^(then|\,)\b/i;
 	var untilRE = /^until\b/i;
-	var andRE = /^and\b/i;
-	var orRE = /^or\b/i;
-	var notRE = /^not\b/i;
-	var impliesRE = /^implies\b/i;
-	var iffRE = /^iff\b/i;
+	var andRE = /^(and|\&)\b/i;
+	var orRE = /^(or|\|)\b/i;
+	var notRE = /^(not|\~)\b/i;
+	var impliesRE = /^(implies|\=\>)\b/i;
+	var iffRE = /^(iff|\<\=\>)\b/i;
 	var lparenRE = /^\(/;
 	var rparenRE = /^\)/;
-
 	var spaceRE = /\s+/;
 	var permuteRE = /^permute\b/i;
 	
 	//move: up or down or left or right
 	//input: up or down or left or right or act
 	//any: up or down or left or right or act or wait
-	var directionRE = /^(up|down|left|right|moving|action|input|wait|any)\b/i;
+	var directionRE = /^(up|down|left|right|\^|\>|\<|v|moving|action|x|input|wait|any)\b/i;
 	//(at Pos)? 2d ...
 	var pattern2DRE = /^(2d\s*\n)((?:\s*\S+\s*\n)+)\n/i;
 	//(at Pos)? Dir? [rule]
@@ -33,7 +32,6 @@ var HintCompiler = (function() {
 
 	var winConditionRE = /^(?:(?:(no|some)\s+(\S+)(?:\s+on\s+(\S+))?)|(?:all\s+(\S+)\s+on\s+(\S+))|(?:(at least|at most|exactly)?\s+([0-9]+)\s+(\S+)(?:\s+on\s+(\S+))?))/i;
 
-	//TODO: put at least/at most/exactly into fireRE?
 	var fireRE = /^fire(?:\s+(up|down|left|right|horizontal|vertical|any))?\s+(\w+)(?:\s+(at least|at most|exactly)?\s+([0-9]+)\s+times)?\b/i;
 	var intRE = /^0|(?:[1-9][0-9]*)/;
 	var identifierRE = /^\w+\b/;
@@ -452,6 +450,11 @@ var HintCompiler = (function() {
 				var endPos = {line:pos.line, ch:pos.ch + match[0].length};
 				var dir = match[0].toLowerCase();
 				var dirs = {up:0,left:1,down:2,right:3,action:4};
+				dirs["^"] = dirs.up;
+				dirs["<"] = dirs.left;
+				dirs["v"] = dirs.down;
+				dirs[">"] = dirs.right;
+				dirs["x"] = dits.action;
 				var inputDir = (dir in dirs) ? dirs[dir] : -1;
 				return {type:"direction", metatype:"predicate", value:{
 					direction:dir,

@@ -444,8 +444,8 @@ function levelFromString(state,level) {
 	return o;
 }
 
-function compile2DPattern(lineNo,pat) {
-	var name = "p2d_"+lineNo;
+function compile2DPattern(patID,lineNo,pat) {
+	var name = "p2d_"+patID;
 	var backgroundlayer=state.backgroundlayer;
 	var backgroundid=state.backgroundid;
 	var backgroundLayerMask = state.layerMasks[backgroundlayer];
@@ -453,8 +453,8 @@ function compile2DPattern(lineNo,pat) {
 	var height = pat.length;
 	var layerCount = state.collisionLayers.length;
 	var functionBody = [
-		"\tvar obj=0|0;",
-		"\tvar i=i0|0;"
+		"var obj=0|0;",
+		"var i=i0|0;"
 	];
 	var levelBackgroundMask = state.layerMasks[state.backgroundlayer];
 	for(var i = 0; i < width; i++) {
@@ -464,7 +464,7 @@ function compile2DPattern(lineNo,pat) {
 				ch=pat[j].charAt(pat[j].length-1);
 			}
 			var mask = state.glyphDict[ch];
-			var maskint;
+			var maskint = null;
 			var isAll = true;
 			if(mask == undefined) {
 				if(state.propertiesDict[ch]) {
@@ -495,24 +495,25 @@ function compile2DPattern(lineNo,pat) {
 			}
 			maskint.ior(levelBackgroundMask);
 			for(var w = 0; w < STRIDE_OBJ; ++w) {
-				functionBody.push("\tobj = level.objects["+STRIDE_OBJ+" * i + " + (STRIDE_OBJ*j+w) + "];");
+				functionBody.push("obj = level.objects["+STRIDE_OBJ+" * i + " + (STRIDE_OBJ*j+w) + "];");
 				if(isAll) { //this == target
-					functionBody.push("\tif(obj != "+maskint.data[w]+") { return false; }");
+					functionBody.push("if(obj != "+maskint.data[w]+") { return false; }");
 				} else { //this & target != 0
-					functionBody.push("\tif((obj & "+maskint.data[w]+") == 0) { return false; }");
+					functionBody.push("if((obj & "+maskint.data[w]+") == 0) { return false; }");
 				}
 			}
 		}
-		functionBody.push("\ti += level.height;");
+		functionBody.push("i += level.height;");
 	}
-	functionBody.push("\treturn true;");
+	functionBody.push("return true;");
+	var fnName = "pat2D_match_"+name;
 	evalCode(
-		["function pat2D_match_"+name+"(i0) {"].
+		["function "+fnName+"(i0) {"].
 			concat(functionBody).
 			concat(["}"]).
 			join("\n")
 	);
-	return global["pat2D_match_"+name];
+	return {name:fnName, fn:global[fnName], width:width, height:height};
 }
 
 //also assigns glyphDict

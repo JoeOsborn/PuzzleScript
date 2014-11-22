@@ -504,7 +504,7 @@ var HintCompiler = (function() {
 					if(!firstRealLine) { firstRealLine = lines[l]; }
 					var linePos = {line:pos.line+l+preMapLines,ch:rawLines[l].indexOf(lines[l].charAt(0))};
 					firstRealLinePos = linePos;
-					realLines.push(l);
+					realLines.push(lines[l]);
 					if(lines[l].length != firstRealLine.length) {
 						throw new Error("Invalid 2d pattern: "+lines[l]+"("+linePos+") of length "+lines[l].length+"; should have length "+firstRealLine.length+" to match first line "+firstRealLine+" ("+firstRealLinePos+")");
 					}
@@ -513,7 +513,8 @@ var HintCompiler = (function() {
 				var lastLine = allLines[allLines.length-1];
 				var endPos = {line:pos.line+allLines.length-1, ch:lastLine.length-1};
 				return {type:"pattern2D", metatype:"predicate", value:{
-					pattern:realLines
+					pattern:realLines,
+					firstLine:firstRealLinePos.line
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok, stream) {
@@ -798,7 +799,6 @@ var HintCompiler = (function() {
 				]).concat(falseA).concat([
 					"}"
 				]);
-				throw new Error("Unsupported hint type (yet!)");
 			case "then":
 				var steps = hint.value.steps;
 				var thenRest = function(i) {
@@ -976,8 +976,36 @@ var HintCompiler = (function() {
 				}
 				return checks.concat(["if(!"+anyTrue+") {"]).concat(falseA).concat(["}"]);
 			case "pattern2D":
-				//TODO: this			
-				throw new Error("Unsupported hint type (yet!) " + hint.type);
+				var pattern = compile2DPattern(hintID, hint.value.firstRealLine, hint.value.pattern);
+				var anyPassed = "anyPassed_"+hintID;
+				var triedRows = "triedRows_"+hintID;
+				var triedCols = "triedCols_"+hintID;
+				var maxIdx = "maxIdx_"+hintID;
+				var loopIdx = "loopIdx_"+hintID;
+				var rowIdx = "rowIdx_"+hintID;
+				return [
+					"var "+anyPassed+" = false;",
+					"var "+triedRows+" = (level.height - "+(pattern.height-1)+") | 0;",
+					"var "+triedCols+" = (level.width - "+(pattern.width-1)+") | 0;",
+					"var "+maxIdx+" = (("+triedCols+" - 1) * level.height + ("+triedRows+" - 1)) | 0;",
+					"var "+loopIdx+" = 0|0;",
+					"var "+rowIdx+" = 0|0;",
+					"while("+loopIdx+" <= "+maxIdx+") {",
+					  "if("+pattern.name+"("+loopIdx+")) {",
+				].concat(rest([anyPassed+" = true;"].concat(trueA),falseA)).concat([
+					  "}",
+						loopIdx+"++;",
+						rowIdx+"++;",
+						"if("+rowIdx+" >= "+triedRows+") {",
+							loopIdx+" -= "+rowIdx+";",
+							loopIdx+" += level.height;",
+							rowIdx+" = 0;",
+						"}",
+					"}",
+					"if(!"+anyPassed+") {"
+				]).concat(falseA).concat([
+					"}"
+				]);
 			case "winCondition":
 				var idx = "winCondition_i_"+hintID;
 				var failed = "winCondition_failed_"+hintID;

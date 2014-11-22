@@ -2,7 +2,7 @@
 
 var global = this;
 
-var HintCompiler = (function() {
+var SpecCompiler = (function() {
 	var module = {};
 	
 	var winningRE = /^winning\b/i;
@@ -132,7 +132,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 1);
+				var rhs = parseSpec(stream, 1);
 				var steps;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is not vital for then's semantics, but it's convenient
@@ -160,7 +160,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 2);
+				var rhs = parseSpec(stream, 2);
 				var steps;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for until's semantics. Groups
@@ -193,7 +193,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 5);
+				var rhs = parseSpec(stream, 5);
 				var conjuncts;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for and's semantics. Groups
@@ -232,7 +232,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 6);
+				var rhs = parseSpec(stream, 6);
 				var disjuncts;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for and's semantics. Groups
@@ -271,7 +271,7 @@ var HintCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseHint(stream, 3);
+				var rhs = parseSpec(stream, 3);
 				return {parse:{
 					type:"implies", 
 					metatype:anyIsTemporal([lhs,rhs.parse]) ? "temporal" : "predicate", value:{
@@ -288,7 +288,7 @@ var HintCompiler = (function() {
 			match:matchSymbol(iffRE, "iff"),
 			nud:noNud,
 			led:function(tok,stream,lhs) {
-				var rhs = parseHint(stream, 4);
+				var rhs = parseSpec(stream, 4);
 				return {parse:{
 					type:"iff", 
 					metatype:anyIsTemporal([lhs,rhs.parse]) ? "temporal" : "predicate", value:{
@@ -309,7 +309,7 @@ var HintCompiler = (function() {
 				return {type:"not", metatype:"predicate", value:{}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok,stream) {
-				var parse = parseHint(stream,7);
+				var parse = parseSpec(stream,7);
 				if(parse.parse.type == "ellipses") {
 					throw new Error("Can't put ellipses into a not by itself");
 				}
@@ -338,7 +338,7 @@ var HintCompiler = (function() {
 				//permute A B C --> ((... then A) and (... then B) and (... then C))
 				var parse;
 				do {
-					parse = parseHint(stream,0);
+					parse = parseSpec(stream,0);
 					if(parse.parse.type == "ellipses") {
 						throw new Error("Can't put ellipses into a permute by itself");
 					}
@@ -376,7 +376,7 @@ var HintCompiler = (function() {
 			type:"lparen",
 			match:matchSymbol(lparenRE, "lparen"),
 			nud:function(tok,stream) {
-				var parse = parseHint(stream,0);
+				var parse = parseSpec(stream,0);
 				if(parse.parse.type == "ellipses") {
 					throw new Error("Can't put ellipses into a group by themselves");
 				}
@@ -615,7 +615,7 @@ var HintCompiler = (function() {
 		return {token:token, string:str, position:pos};
 	}
 	
-	function parseHint(stream,rbp) {
+	function parseSpec(stream,rbp) {
 		if(rbp == undefined) { rbp = 0; }
 		/*
     t,stream = consumeToken(stream)
@@ -627,7 +627,7 @@ var HintCompiler = (function() {
       t,stream' = nextToken(stream)
     return p, stream
 		*/
-		//str also includes everything after the hint, so be careful!
+		//str also includes everything after the spec, so be careful!
 		var streamPrime;
 		stream = consumeToken(stream);
 		var leftStream = NUDS[stream.token.type](stream.token,stream);
@@ -649,15 +649,15 @@ var HintCompiler = (function() {
 		//TODO: ensure nothing is to the right (arrow-wise) of a "finished" or a "winning" check
 		return {parse:parse, stream:stream};
 		/*
-		Hint := 
-		   TimeHint then TimeHint [tightness 1]
-		 | Hint and Hint [tightness 2]
-		 | Hint or Hint [tightness 3]
-		 | not Hint [tightness 4]
-		 | (Hint) [tightness infinity]
+		Spec := 
+		   TimeSpec then TimeSpec [tightness 1]
+		 | Spec and Spec [tightness 2]
+		 | Spec or Spec [tightness 3]
+		 | not Spec [tightness 4]
+		 | (Spec) [tightness infinity]
 		 | WinCondition [tightness 5]
-		 | permute Hint Hint Hint [tightness 0]
-		 | repeatedly Hint [tightness 0.5]
+		 | permute Spec Spec Spec [tightness 0]
+		 | repeatedly Spec [tightness 0.5]
 		 | Direction [tightness 5]
 		 | 2DPattern [tightness 5]
 		 | RulePattern [tightness 5]
@@ -665,12 +665,12 @@ var HintCompiler = (function() {
 		 | fire Rule Direction [tightness 5]
 		 | fire Rule Times [tightness 5]
 		 | fire Rule [tightness 5]
-		TimeHint :=
+		TimeSpec :=
 		   ... [tightness 5]
-		 | Hint
+		 | Spec
 		*/
 	}
-	module.parseHint = parseHint;
+	module.parseSpec = parseSpec;
 	
 	var AGAIN_LIMIT = 100;
 
@@ -699,10 +699,10 @@ var HintCompiler = (function() {
 		join("\n");
 	}
 	
-	var _hintID = 0;
-	function consumeHintID() {
-		_hintID++;
-		return _hintID;
+	var _specID = 0;
+	function consumeSpecID() {
+		_specID++;
+		return _specID;
 	}
 	
 	//pred should include "result = ..."
@@ -717,12 +717,12 @@ var HintCompiler = (function() {
 	}
 	
 	//Action :: [String]
-	//codegen(Hint, (Action x Action -> [String]), Action, Action)
-	function codegen(hint, rest, trueA, falseA) {
-		var hintID = consumeHintID();
-		switch(hint.type) {
+	//codegen(Spec, (Action x Action -> [String]), Action, Action)
+	function codegen(spec, rest, trueA, falseA) {
+		var specID = consumeSpecID();
+		switch(spec.type) {
 			case "group":
-				return codegen(hint.value.contents, rest, trueA, falseA);
+				return codegen(spec.value.contents, rest, trueA, falseA);
 			case "and":
 				/*
 				A
@@ -735,11 +735,11 @@ var HintCompiler = (function() {
 						falseA
 					}
 				*/
-				var conjuncts = hint.value.conjuncts;
-				var si0 = "si0_"+hintID;
-				var end = "end_"+hintID;
+				var conjuncts = spec.value.conjuncts;
+				var si0 = "si0_"+specID;
+				var end = "end_"+specID;
 				var pre = [], updateEnd="";
-				if(isTemporal(hint)) {
+				if(isTemporal(spec)) {
 					pre = ["var "+end+" = si;",storeStateStmt(si0)];
 					updateEnd = end+" = "+end+" < si ? si : "+end+";";
 				}
@@ -760,11 +760,11 @@ var HintCompiler = (function() {
 				}
 				return pre.concat(codegen(conjuncts[0], andRest(1), trueA, falseA));
 			case "or":
-				var disjuncts = hint.value.disjuncts;
-				var anyPassed = "anyPassed_"+hintID;
-				var si0 = "si0_"+hintID;
+				var disjuncts = spec.value.disjuncts;
+				var anyPassed = "anyPassed_"+specID;
+				var si0 = "si0_"+specID;
 				var store = "", unwind = "";
-				if(isTemporal(hint)) {
+				if(isTemporal(spec)) {
 					store = storeStateStmt(si0);
 					unwind = unwindStateStmt(si0);
 				}
@@ -783,14 +783,14 @@ var HintCompiler = (function() {
 				result = result.concat(["if(!"+anyPassed+") {"]).concat(falseA).concat(["}"]);
 				return result;
 			case "not":
-				var label = "loopNot_"+hintID;
-				var occurred = "notOccurred_"+hintID;
+				var label = "loopNot_"+specID;
+				var occurred = "notOccurred_"+specID;
 				return [
 					label+":",
 					"do {",
 					"var "+occurred+" = false;"
 				].concat(
-					codegen(hint.value.contents, function(tA,fA) { return tA; }, [occurred+" = true;", "break "+label+";"], [occurred+" = false;", "break "+label+";"])
+					codegen(spec.value.contents, function(tA,fA) { return tA; }, [occurred+" = true;", "break "+label+";"], [occurred+" = false;", "break "+label+";"])
 				).concat([
 					"} while(false);",
 					"if(!"+occurred+") {"
@@ -800,7 +800,7 @@ var HintCompiler = (function() {
 					"}"
 				]);
 			case "then":
-				var steps = hint.value.steps;
+				var steps = spec.value.steps;
 				var thenRest = function(i) {
 					if(i == steps.length) {
 						return rest;
@@ -809,12 +809,12 @@ var HintCompiler = (function() {
 						if(step.type == "ellipses") {
 							return function(tA, fA) {
 								//consume 0 or more steps
-								var si0 = "si0_"+hintID+"_"+i;
-								var anyPassed = "anyPassed_"+hintID+"_"+i;
-								var label = "loopEllipses_"+hintID+"_"+i;
-								var minLength = hint.value.minLength;
-								var maxLength = hint.value.maxLength;
-								var ellipsesEnd = "ellipsesEnd"+hintID+"_"+i;
+								var si0 = "si0_"+specID+"_"+i;
+								var anyPassed = "anyPassed_"+specID+"_"+i;
+								var label = "loopEllipses_"+specID+"_"+i;
+								var minLength = spec.value.minLength;
+								var maxLength = spec.value.maxLength;
+								var ellipsesEnd = "ellipsesEnd"+specID+"_"+i;
 								return unwindStateStmt("si + "+minLength, 
 									[
 										"var "+anyPassed+" = false;",
@@ -843,7 +843,7 @@ var HintCompiler = (function() {
 				}
 				return (thenRest(0))(trueA,falseA);
 			case "until":
-				var steps = hint.value.steps;
+				var steps = spec.value.steps;
 				var h0 = steps[0];
 				var h1 = steps[1];
 				//transform a until b until c ==to==> a until b, rest = b until c
@@ -854,13 +854,13 @@ var HintCompiler = (function() {
 						type:"until",
 						metatype:"temporal",
 						value:{steps:[h0,h1]},
-						range:{start:hint.range.start, end:h1.range.end}
+						range:{start:spec.range.start, end:h1.range.end}
 					},function(tA, fA) {
 						return codegen({
 							type:"until",
 							metatype:"temporal",
 							value:{steps:steps.slice(1)},
-							range:{start:hint.range.start, end:steps[steps.length-1].range.end}
+							range:{start:spec.range.start, end:steps[steps.length-1].range.end}
 						}, rest, tA, fA);
 					}, trueA, falseA);
 				}
@@ -877,9 +877,9 @@ var HintCompiler = (function() {
 					falseA
 				}
 				*/
-				var si0 = "si0_"+hintID;
-				var anyPassed = "anyPassed_"+hintID;
-				var label = "loopUntil_"+hintID;
+				var si0 = "si0_"+specID;
+				var anyPassed = "anyPassed_"+specID;
+				var label = "loopUntil_"+specID;
 				return [
 					"var "+anyPassed+" = false;",
 					label+":",
@@ -900,9 +900,9 @@ var HintCompiler = (function() {
 				]);
 			case "implies":
 				//a => b ---> (not a) or b
-				var lhs = hint.value.lhs;
-				var rhs = hint.value.rhs;
-				var temporal = isTemporal(hint);
+				var lhs = spec.value.lhs;
+				var rhs = spec.value.rhs;
+				var temporal = isTemporal(spec);
 				return codegen({
 					type:"or",
 					metatype:temporal,
@@ -917,13 +917,13 @@ var HintCompiler = (function() {
 							rhs
 						]
 					},
-					range:hint.range
+					range:spec.range
 				}, rest, trueA, falseA);
 			case "iff":
 				//a <=> b ---> (a => b) and (b => a)
-				var lhs = hint.value.lhs;
-				var rhs = hint.value.rhs;
-				var temporal = isTemporal(hint);
+				var lhs = spec.value.lhs;
+				var rhs = spec.value.rhs;
+				var temporal = isTemporal(spec);
 				return codegen({
 					type:"and",
 					metatype:temporal,
@@ -932,23 +932,23 @@ var HintCompiler = (function() {
 							type:"implies",
 							metatype:temporal,
 							value:{lhs:lhs, rhs:rhs},
-							range:hint.range
+							range:spec.range
 						},
 						{
 							type:"implies",
 							metatype:temporal,
 							value:{lhs:rhs, rhs:lhs},
-							range:hint.range
+							range:spec.range
 						}
 					]},
-					range:hint.range
+					range:spec.range
 				}, rest, trueA, falseA);
 			case "finished":
 				return evaluatePredicate(["result = si == steps.length-1;"], rest, trueA, falseA);
 			case "winning":
 				return evaluatePredicate(["result = winning;"], rest, trueA, falseA);
 			case "direction":
-				switch(hint.value.direction) {
+				switch(spec.value.direction) {
 					case "any":
 						return evaluatePredicate(["result = true;"], rest, trueA, falseA);
 					case "wait":
@@ -958,17 +958,17 @@ var HintCompiler = (function() {
 					case "moving":
 						return evaluatePredicate(["result = states[si].step >= 0 && states[si].step <= 3;"], rest, trueA, falseA);
 					default:
-						return evaluatePredicate(["result = states[si].step == "+hint.value.inputDir+";"], rest, trueA, falseA);
+						return evaluatePredicate(["result = states[si].step == "+spec.value.inputDir+";"], rest, trueA, falseA);
 				}			
 			case "pattern1D":
-				var anyTrue = "p1d_anyTrue_"+hintID;
+				var anyTrue = "p1d_anyTrue_"+specID;
 				var checks = ["var "+anyTrue+" = false;"];
-				for(var i = 0; i < hint.value.rules.length; i++) {
-					var rule = hint.value.rules[i];
+				for(var i = 0; i < spec.value.rules.length; i++) {
+					var rule = spec.value.rules[i];
 					//We know that these kinds have rule have only one pattern.
-					var matchFn = "hint_"+hint.range.start.line+"_"+hintID+"_p1d_match_"+i;
+					var matchFn = "spec_"+spec.range.start.line+"_"+specID+"_p1d_match_"+i;
 					compileMatchFunction(state, matchFn, rule, 0);
-					checks = checks.concat(generateMatchLoops("p1d_"+hintID+"_"+i+"_",rule,[matchFn],
+					checks = checks.concat(generateMatchLoops("p1d_"+specID+"_"+i+"_",rule,[matchFn],
 						function occ(_prefix, _rule, _indices, _ks) {
 							return rest([anyTrue+" = true;"].concat(trueA), []);
 						}
@@ -976,13 +976,13 @@ var HintCompiler = (function() {
 				}
 				return checks.concat(["if(!"+anyTrue+") {"]).concat(falseA).concat(["}"]);
 			case "pattern2D":
-				var pattern = compile2DPattern(hintID, hint.value.firstRealLine, hint.value.pattern);
-				var anyPassed = "anyPassed_"+hintID;
-				var triedRows = "triedRows_"+hintID;
-				var triedCols = "triedCols_"+hintID;
-				var maxIdx = "maxIdx_"+hintID;
-				var loopIdx = "loopIdx_"+hintID;
-				var rowIdx = "rowIdx_"+hintID;
+				var pattern = compile2DPattern(specID, spec.value.firstRealLine, spec.value.pattern);
+				var anyPassed = "anyPassed_"+specID;
+				var triedRows = "triedRows_"+specID;
+				var triedCols = "triedCols_"+specID;
+				var maxIdx = "maxIdx_"+specID;
+				var loopIdx = "loopIdx_"+specID;
+				var rowIdx = "rowIdx_"+specID;
 				return [
 					"var "+anyPassed+" = false;",
 					"var "+triedRows+" = (level.height - "+(pattern.height-1)+") | 0;",
@@ -1007,10 +1007,10 @@ var HintCompiler = (function() {
 					"}"
 				]);
 			case "winCondition":
-				var idx = "winCondition_i_"+hintID;
-				var failed = "winCondition_failed_"+hintID;
-				var f1 = hint.value.target;
-				var f2 = hint.value.on;
+				var idx = "winCondition_i_"+specID;
+				var failed = "winCondition_failed_"+specID;
+				var f1 = spec.value.target;
+				var f2 = spec.value.on;
 				var checks1 = "("; //target is not there
 				var checks2 = "("; //object is not there
 				for(var i = 0; i < STRIDE_OBJ; i++) {
@@ -1018,7 +1018,7 @@ var HintCompiler = (function() {
 					checks1 = checks1 + "!("+f1.data[i]+" & level.objects["+idx+"*STRIDE_OBJ+"+i+"])" + (i < STRIDE_OBJ - 1 ? " && " : ")");
 					checks2 = checks2 + "!("+f2.data[i]+" & level.objects["+idx+"*STRIDE_OBJ+"+i+"])" + (i < STRIDE_OBJ - 1 ? " && " : ")");
 				}
-				var label = "winCondition_loop_"+hintID;
+				var label = "winCondition_loop_"+specID;
 				switch(condition) {
 					case "no":
 						return [
@@ -1063,8 +1063,8 @@ var HintCompiler = (function() {
 					case "at least":
 					case "at most":
 					case "exactly":
-						var count = "winCondition_count_"+hintID;
-						var targetCount = hint.value.count;
+						var count = "winCondition_count_"+specID;
+						var targetCount = spec.value.count;
 						var countChecks = {
 							"at least":count+" >= "+targetCount,
 							"at most":count+" <= "+targetCount,
@@ -1084,32 +1084,31 @@ var HintCompiler = (function() {
 							"}"
 						]);
 					default:
-						throw new Error("Unsupported win condition " + hint.value.condition);
+						throw new Error("Unsupported win condition " + spec.value.condition);
 				}
 			case "fire":
-				throw new Error("Unsupported hint type (yet!) " + hint.type);
+				throw new Error("Unsupported spec type (yet!) " + spec.type);
 			default:
-				throw new Error("Unsupported hint type " + hint.type);
+				throw new Error("Unsupported spec type " + spec.type);
 		}
 	}
 	
-	module.compileHintBody = function compileHintBody(str,pos) {
-		hintID = 0;
-		var result = parseHint({token:null,string:str,position:pos}, 0);
-		var hint = result.parse;
-		//drop the )
-		result.remainder = result.stream.string.substring(result.stream.string.indexOf(")")+1);
-		//now, compile to a function which ensures the hint is valid, starting from some arbitrary initial state.
-		var hintFnPre = [
+	module.compileSpec = function compileSpec(str,pos) {
+		specID = 0;
+		var result = parseSpec({token:null,string:str,position:pos}, 0);
+		var spec = result.parse;
+		result.remainder = result.stream.string;
+		//now, compile to a function which ensures the spec is valid, starting from some arbitrary initial state.
+		var specFnPre = [
 			"var initObjects = level.objects;",
 			"var si = 0;"
 		];
-		var hintFnPost = [
+		var specFnPost = [
 			"level.objects = initObjects;",
 			"return false;", 
 			"}"
 		];
-		var generated = codegen(hint,
+		var generated = codegen(spec,
 			function(tA, fA) { return ["if(si == states.length-1) {"].concat(tA).concat(["} else {"]).concat(fA).concat(["}"]); },
 			[
 				"if(!matchFn || !matchFn()) {",
@@ -1119,10 +1118,11 @@ var HintCompiler = (function() {
 			],
 			[]
 		);
-		var hintFn = prettify(["function hint_"+pos.line+"(states, matchFn) {","console.log('hint');"].concat(hintFnPre).concat(generated).concat(hintFnPost).join("\n"));
-		evalCode(hintFn);
-		result.hint = {
-			match:global["hint_"+pos.line]
+		var specFn = prettify(["function spec_"+pos.line+"(states, matchFn) {","console.log('spec');"].concat(specFnPre).concat(generated).concat(specFnPost).join("\n"));
+		evalCode(specFn);
+		result.spec = {
+			name:"spec_"+pos.line,
+			match:global["spec_"+pos.line]
 		};
 		return result;
 	}

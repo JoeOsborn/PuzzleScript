@@ -457,36 +457,7 @@ var Analyzer = (function() {
 		//assert(every_element_unique(q))
 		return q;
 	}
-	
-	var dirRE = /^(UP|DOWN|LEFT|RIGHT|ACT|WAIT|ANY|\.\.\.)(?:\s|\)|\&)/i;
-	function consumeHintElement(str) {
-		var idx = 0;
-		var hint = null;
-		//repeatedly: parse a direction, then whitespace; or a \).
-		while(idx < str.length) {
-			if(str[idx] == ")") {
-				idx++;
-				break;
-			}
-			var match = str.match(dirRE);
-			if(match) {
-				idx += match[0].length-1;
-				var thisMove = match[1];
-				hint = {move:REVERSE_INPUT_MAPPING[thisMove.toUpperCase()]};
-				break;
-			} else if(false) {
-				//TODO: also parse a 2D pattern or a conjunction or a negation of a direction/pattern
-				break;
-			} else {
-				idx++;
-			}
-			str = str.substring(idx);
-			idx = 0;
-		}
-		str = str.substring(idx);
-		return {remainder:str, hint:hint};
-	}
-	
+		
 	var compiledLevelHints = {};
 	var hintStartRE = /\(\s*@HINT:/i;
 	function compileHints() {
@@ -506,8 +477,8 @@ var Analyzer = (function() {
 				idx += hintStartMatch.index+hintStartMatch[0].length;
 				var range = [editor.posFromIndex(idx), null];
 				str = str.substring(hintStartMatch.index+hintStartMatch[0].length).trim();
-				var result = HintCompiler.compileHintBody(str,range[0]);
-				hints.push(result.hint);
+				var result = SpecCompiler.compileSpec(str,range[0]);
+				hints.push(result.spec);
 				idx += str.length - result.remainder.length + 1; //drop the ) too
 				str = result.remainder.substring(1);
 				range[1] = editor.posFromIndex(idx);

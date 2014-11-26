@@ -10,11 +10,11 @@
     background: rgb(163, 55, 55) !important;
 }
 
-.line-editor-hint-used {
+.line-editor-spec-met {
     background: rgb(28, 109, 28) !important;
 }
 
-.line-editor-hint-unused {
+.line-editor-spec-unmet {
     background: rgb(163, 55, 55) !important;
 }
 

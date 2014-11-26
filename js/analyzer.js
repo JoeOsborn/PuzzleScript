@@ -19,21 +19,17 @@ var Analyzer = (function() {
 	var RANDOM_RESTART = false;
 	var AUTO_HINT = false;
 	var INPUT_MAPPING = {};
-	INPUT_MAPPING[-3]="ANY";
-	INPUT_MAPPING[-2]="...";
 	INPUT_MAPPING[-1]="WAIT";
 	INPUT_MAPPING[0]="UP";
 	INPUT_MAPPING[1]="LEFT";
 	INPUT_MAPPING[2]="DOWN";
 	INPUT_MAPPING[3]="RIGHT";
-	INPUT_MAPPING[4]="ACT";
+	INPUT_MAPPING[4]="ACTION";
 	
 	var CODE_ANY_MOVE = -3;
 	var CODE_DOTDOTDOT = -2;
 
 	var REVERSE_INPUT_MAPPING = {
-		ANY:CODE_ANY_MOVE,
-		"...":CODE_DOTDOTDOT,
 		WAIT:-1,
 		UP:0,
 		LEFT:1,
@@ -74,8 +70,8 @@ var Analyzer = (function() {
 	var unsolvedClass = "line-editor-unsolved";
 	var unsolvableClass = "line-editor-unsolvable";
 
-	var hintUsedClass = "line-editor-hint-used";
-	var hintUnusedClass = "line-editor-hint-unused";
+	var specMetClass = "line-editor-spec-met";
+	var specUnmetClass = "line-editor-spec-unmet";
 
 	var lineSolutionTooShortClass = "line-editor-solution-too-short";
 	var lineSolutionTooLongClass = "line-editor-solution-too-long";
@@ -118,7 +114,7 @@ var Analyzer = (function() {
 		}
 		gameRules = text;
 		console.log("analyze "+command+" with "+randomseed+" in "+curlevel);
-		compileHints();
+		parseSpecs();
 		if(module.mode == module.MODE_MEM_TEST) {
 			killAllWorkers();
 			levelQueue = [];
@@ -160,9 +156,9 @@ var Analyzer = (function() {
 		updateRuleCountDisplay();
 	}
 	
-	module.dumpHint = function dumpHint() {
-		var input = prefixToSolutionSteps(inputHistory);
-		consolePrint("<br/>Paste this just after the level definition:<br/>(@HINT:"+input.join(" ")+")<br/>",true);
+	module.dumpSpec = function dumpSpec() {
+		var input = prefixToSolutionSteps(inputHistory).join(" , ") + " , ...";
+		consolePrint("<br/>Paste this just after the level definition:<br/>(@SPEC:"+input.join(" ")+")<br/>",true);
 	};
 	
 	function nextEmptyLine(l) {
@@ -233,39 +229,39 @@ var Analyzer = (function() {
 		return null;
 	}
 
-	function allMatchingHint(lev, arrays, hint) {
-		var matched = [];
-		for(var i = 0; i < arrays.length; i++) {
-			var ar = arrays[i];
-			if(hintMatches(lev, ar, hint)) {
-				matched.push(ar);
-			}
-		}
-		return matched;
-	}
-
-	var _ao1, zero;
-	function hintMatches(lev, steps, hint) {
-		//FIXME: scrumbles up the world state.
-		var oldLevel = curlevel;
-		var oldState = backupLevel();
-		var oldTesting = unitTesting;
-		var oldAuto = testsAutoAdvanceLevel;
-		if(lev != curlevel) {
-			compile(["loadLevel",lev]);
-		}
-		_ao1 = new BitVec(STRIDE_OBJ);
-		zero = new BitVec(STRIDE_OBJ);
-		zero.setZero();
-		var result = hint.match(steps);
-		if(lev != oldLevel) {
-			compile(["loadLevel",oldLevel]);
-		}
-		restoreLevel(oldState);
-		unitTesting = oldTesting;
-		testsAutoAdvanceLevel = oldAuto;
-		return result;
-	}
+	// function allMatchingSpec(lev, arrays, hint) {
+	// 	var matched = [];
+	// 	for(var i = 0; i < arrays.length; i++) {
+	// 		var ar = arrays[i];
+	// 		if(hintMatches(lev, ar, hint)) {
+	// 			matched.push(ar);
+	// 		}
+	// 	}
+	// 	return matched;
+	// }
+	//
+	// var _ao1, zero;
+	// function hintMatches(lev, steps, hint) {
+	// 	//FIXME: scrumbles up the world state.
+	// 	var oldLevel = curlevel;
+	// 	var oldState = backupLevel();
+	// 	var oldTesting = unitTesting;
+	// 	var oldAuto = testsAutoAdvanceLevel;
+	// 	if(lev != curlevel) {
+	// 		compile(["loadLevel",lev]);
+	// 	}
+	// 	_ao1 = new BitVec(STRIDE_OBJ);
+	// 	zero = new BitVec(STRIDE_OBJ);
+	// 	zero.setZero();
+	// 	var result = hint.match(steps);
+	// 	if(lev != oldLevel) {
+	// 		compile(["loadLevel",oldLevel]);
+	// 	}
+	// 	restoreLevel(oldState);
+	// 	unitTesting = oldTesting;
+	// 	testsAutoAdvanceLevel = oldAuto;
+	// 	return result;
+	// }
 
 	function clearRuleCountDisplay() {
 		editor.clearGutter(analyzerRuleCountGutter);
@@ -364,19 +360,20 @@ var Analyzer = (function() {
 					editor.addLineClass(l, "background", solClass);
 					lineHighlights[l] = solClass;
 				}
-				//now, highlight hints:
-				//if a hint is prefix to the solution, highlight it green
+				//now, highlight specs:
+				//if a spec matches the solution, highlight it green
 				//otherwise, highlight it red
 				if(seenSolutions[i].solved) {
-					var hints = compiledLevelHints[i];
-					for(var j = 0; j < seenSolutions[i].matchedHints.length; j++) {
-						l = hints.ranges[j];
-						var hintClass = seenSolutions[i].matchedHints[j] ? hintUsedClass : hintUnusedClass;
+					var specs = parsedLevelSpecs[i];
+					for(var j = 0; j < seenSolutions[i].matchedSpecs.length; j++) {
+						l = specs.ranges[j];
+						if(!l) { continue; }
+						var specClass = seenSolutions[i].matchedSpecs[j] ? specMetClass : specUnmetClass;
 						for(var li = l[0].line; li <= l[1].line; li++) {
-							editor.removeLineClass(li, "background", hintUsedClass);
-							editor.removeLineClass(li, "background", hintUnusedClass);
-							editor.addLineClass(li, "background", hintClass);
-							lineHighlights[li] = hintClass;
+							editor.removeLineClass(li, "background", specMetClass);
+							editor.removeLineClass(li, "background", specUnmetClass);
+							editor.addLineClass(li, "background", specClass);
+							lineHighlights[li] = specClass;
 						}
 					}
 					var bounds = solutionBounds(i);
@@ -442,7 +439,7 @@ var Analyzer = (function() {
 	}
 	
 	function createLevelQueue(force, prioritize) {
-		//TODO: permit "clearing" default hints.
+		//TODO: permit "clearing" default specs.
 		var q = [];
 		for(var i = 0; i < prioritize.length; i++) {
 			if(state.levels[prioritize[i]] && !state.levels[prioritize[i]].message) {
@@ -458,35 +455,40 @@ var Analyzer = (function() {
 		return q;
 	}
 		
-	var compiledLevelHints = {};
-	var hintStartRE = /\(\s*@HINT:/i;
-	function compileHints() {
+	var parsedLevelSpecs = {};
+	var specStartRE = /\(\s*@SPEC:/i;
+	function parseSpecs() {
 		for(var lev = 0; lev < state.levels.length; lev++) {
 			if(state.levels[lev].message) { continue; }
 			var l0 = state.levels[lev].lineNumber+1;
 			var l1 = nextLevelLine(lev);
-			var hints = [];
+			var specs = [];
 			var ranges = [];
-			//find a (@HINT starting at or after l1 but before l2
-			//find the ) after that @HINT
+			var strings = [];
+			//find a (@SPEC starting at or after l1 but before l2
+			//find the ) after that @SPEC
 			//then parse it
 			var str = editor.getRange({line:l0},{line:l1});
-			var hintStartMatch;
+			var str0;
+			var specStartMatch;
 			var idx = editor.indexFromPos({line:l0});
-			while(hintStartMatch = str.match(hintStartRE)) {
-				idx += hintStartMatch.index+hintStartMatch[0].length;
+			while(specStartMatch = str.match(specStartRE)) {
+				idx += specStartMatch.index+specStartMatch[0].length;
 				var range = [editor.posFromIndex(idx), null];
-				str = str.substring(hintStartMatch.index+hintStartMatch[0].length).trim();
-				var result = SpecCompiler.compileSpec(str,range[0]);
-				hints.push(result.spec);
-				idx += str.length - result.remainder.length + 1; //drop the ) too
-				str = result.remainder.substring(1);
+				str = str.substring(specStartMatch.index+specStartMatch[0].length).trim();
+				str0 = str;
+				var result = SpecCompiler.parseSpec(str,range[0]);
+				idx += str.length - result.stream.string.length + 1; //drop the ) too
+				str = result.stream.string.substring(1);
 				range[1] = editor.posFromIndex(idx);
+				specs.push(result.parse);
 				ranges.push(range);
+				strings.push(str0.substring(0,(str0.length-str.length)-1));
+				str0 = str;
 			}
-			compiledLevelHints[lev] = {hints:hints, ranges:ranges};
+			parsedLevelSpecs[lev] = {specs:specs, strings:strings, ranges:ranges};
 		}
-		return compiledLevelHints;
+		return parsedLevelSpecs;
 	}
 	
 	function annotationsBetween(l1, l2) {
@@ -529,22 +531,19 @@ var Analyzer = (function() {
 		return {low:low, high:high, lowBounds:lowBounds, highBounds:highBounds};
 	}
 	
-	function levelHint(lev) {
-		var userHints = compiledLevelHints[lev];
+	function levelSpec(lev) {
+		var userSpecs = parsedLevelSpecs[lev];
 		var solPrefixes = AUTO_HINT && seenSolutions[lev] && seenSolutions[lev].prefixes && seenSolutions[lev].prefixes.length ? seenSolutions[lev].prefixes : [];
-		userHints.hints = userHints.hints.concat(solPrefixes.map(function(pref) {
-			return pref.map(function(move) {
-				return {move:move}
-			});
+		return userSpecs.specs.concat(solPrefixes.map(function(pref) {
+			return prefixToSolutionSteps(pref).join(" , ");
 		}));
-		return userHints.hints;
 	}
 	
 	function tickLevelQueue(wkr) {
 		if(!levelQueue.length) { return; }
 		var lev = levelQueue.shift();
 		var level = state.levels[lev];
-		var hint = levelHint(lev);
+		var spec = levelSpec(lev);
 		//If we previously had some good solutions for lev:
 		if(seenSolutions[lev] && !seenSolutions[lev].stale) {
 			//Copy them and mark seenSolutions[lev] as stale
@@ -557,17 +556,17 @@ var Analyzer = (function() {
 				level:lev,
 				mode:"fast",//"fast_then_best",
 				//seed:randomseed,
-				hint:hint,
+				spec:spec,
 				verbose:true
 			}, handleSolver, tickLevelQueue);
 		} else {
-			workers[lev] = {init: { rules:gameRules, level:lev, mode:"fast", hint:hint, verbose:true }};
+			workers[lev] = {init: { rules:gameRules, level:lev, mode:"fast", spec:spec, verbose:true }};
 			Solver.RANDOM_RESTART = Analyzer.RANDOM_RESTART;
 			Solver.startSearch({
 				rules:gameRules,
 				level:lev,
 				mode:"fast",//"fast_then_best",
-				hint:hint,
+				spec:spec,
 				//seed:randomseed,
 				verbose:true,
 				replyFn:function(type,msg) {
@@ -592,7 +591,7 @@ var Analyzer = (function() {
 	function runMemoryTest(wkr) {
 		var lev = curlevel;
 		var level = state.levels[lev];
-		var hint = levelHint(lev);
+		var spec = levelSpec(lev);
 		if(USE_WORKERS) {
 			startWorker("memorytest", lev, {
 				rules:gameRules,
@@ -642,9 +641,9 @@ var Analyzer = (function() {
 				recordSolution(workers[id].init.rules, workers[id].init.levelText, data);
 				consoleCacheDump();
 				// TODO: I just got a solution. was it the first solution? if so, do not continue this solver until other guys get a chance to run.
-				//	   do fancy stuff with hints, warnings, etc
+				//	   do fancy stuff with specs, warnings, etc
 				// otherwise: compare the new solution to the old best solution. let it continue normally right away.
-				//	   do the same fancy stuff with hints, warnings, etc
+				//	   do the same fancy stuff with specs, warnings, etc
 				break;
 			case "exhausted":
 				consolePrint("Level "+data.level+": Did not find more solutions after "+data.response.iterations+" iterations ("+data.time+" seconds)");
@@ -779,7 +778,7 @@ var Analyzer = (function() {
 				solved:true,
 				stale:false,
 				prefixes:soln.prefixes,
-				matchedHints:[],
+				matchedSpecs:[],
 				steps:soln.prefixes.map(prefixToSolutionSteps),
 				iteration:data.iteration,
 				exhaustive:data.queueLength == 0,
@@ -790,25 +789,27 @@ var Analyzer = (function() {
 			seenSolutions[level].steps = seenSolutions[level].steps.concat(soln.prefixes.map(prefixToSolutionSteps));
 			seenSolutions[level].exhaustive = data.queueLength == 0;
 		}
-		
-		var hints = compiledLevelHints[level];
-		for(var j = 0; j < hints.ranges.length; j++) {
-			var matchedPrefixes = allMatchingHint(
-				//FIXME: seed issues?
-				level,
-				soln.prefixes,
-				hints.hints[j]
-			);
-			seenSolutions[level].matchedHints[j] = (matchedPrefixes.length == soln.prefixes.length) && 
-			  (!(j in seenSolutions[level].matchedHints) || 
-			   seenSolutions[level].matchedHints[j]
-			  );
-			if(matchedPrefixes.length != soln.prefixes.length) {
-				//TODO: warn about unmatched solns for this hint
-				warn("Unmatched solutions and hint-valid solutions:\n"+soln.prefixes.map(prefixToSolutionSteps).join("\n")+"\n  VS  \n"+matchedPrefixes.map(prefixToSolutionSteps).join("\n"));
+		var levelSpecs = levelSpec(level);
+		//for each prefix, there is a matchedSpecs array in soln.matchedSpecsByPrefix
+		for(var p = 0; p < soln.matchedSpecsByPrefix.length; p++) {
+			var matchedSpecs = soln.matchedSpecsByPrefix[p];
+			for(var s = 0; s < matchedSpecs.length; s++) {
+				if(!matchedSpecs[s]) {
+					seenSolutions[level].matchedSpecs[s] = false;
+					if(s < parsedLevelSpecs[level].specs.length) {
+						logWarning(
+							"Solution prefix "+prefixToSolutionSteps(soln.prefixes[p]).join("\n")+"\n does not match spec ("+parsedLevelSpecs[level].strings[s]+")",
+							parsedLevelSpecs[level].ranges[s][0].line+1,
+							true
+						);
+					} else {
+						//auto-spec. They're notified separately.
+					}
+				} else {
+					seenSolutions[level].matchedSpecs[s] = true;
+				}
 			}
 		}
-
 		storedRuleCounts[data.level][RC_CATEGORY_WIN] = soln.ruleCounts[0];
 		updateLevelHighlights();
 		updateRuleCountDisplay();
@@ -825,7 +826,7 @@ var Analyzer = (function() {
 			solved:false,
 			stale:false,
 			prefixes:RANDOM_RESTART ? data.response.kickstart : [],
-			matchedHints:[],
+			matchedSpecs:levelSpec(level).map(function(_) { return false; }),
 			steps:[],
 			iteration:data.response.iterations,
 			exhaustive:data.response.fullyExhausted,

@@ -12,7 +12,8 @@ importScripts(
 	"../colors.js",
 	"../engine.js",
 	"../parser.js",
-	"../compiler.js"
+	"../compiler.js",
+	"SpecCompiler.js"
 );
 
 importScripts("solver_cautious.js");//, "solver_free_move.js");

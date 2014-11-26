@@ -62,6 +62,8 @@ var SolverCautious = (function() {
 	var NODE_LIMIT=Infinity;
 	
 	var notPlayerMask;
+	
+	var specs;
 
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
@@ -70,6 +72,12 @@ var SolverCautious = (function() {
 		notPlayerMask.iflip();
 		nodeId=0;
 		seenPlayerPositions = {};
+
+		var parsedSpecs = config.spec || [];
+		specs = [];
+		for(var s = 0; s < parsedSpecs.length; s++) {
+			specs.push(SpecCompiler.compileSpec("s_"+curlevel+"_"+s,parsedSpecs[s]));
+		}
 		
 		MAP_SIZE = level.n_tiles * STRIDE_OBJ * 4; // each STRIDE is 32 bits
 		var memLimit = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "MEMORY_LIMIT", Infinity)); // in MB
@@ -128,43 +136,43 @@ var SolverCautious = (function() {
 		hDiscount = initHDiscount;
 		gDiscount = initGDiscount;
 				
-		//log("lvl"+LEVEL+": config.hint="+JSON.stringify(config.hint));
-		
-		if(config.hint && config.hint.prefixes && config.hint.prefixes.length) {
-			hDiscount = 0;
-			gDiscount = 0;
-			var hint = config.hint;
-			for(var hi=0; hi < hint.prefixes.length; hi++) {
-				var node = root;
-				for(var ai=0; ai < hint.prefixes[hi].length; ai++) {
-					var hintI = hint.prefixes[hi][ai];
-					if(hintI == DOTDOTDOT) {
-						//just skip it for now
-					} else {
-						if(q.length==0) {
-							log("Got a win earlier than expected");
-							break;
-						}
-						node.actions.splice(node.actions.indexOf(hint.prefixes[hi][ai]));
-						node.actions.push(hint.prefixes[hi][ai]);
-						node = expand(0, node);
-					}
-				}
-			}
-			if(q.length != 0) {
-				Solver.REPLY_FN("hintInsufficient", {
-					level:Solver.LEVEL,
-					hint:config.hint,
-					queueLength:q.length,
-					nodeCount:nodeId,
-					minG:(q.peek() ? q.peek().g : -1),
-					minH:(q.peek() ? q.peek().h : -1),
-					time:Solver.timeSinceStart()
-				});
-			}
-			hDiscount = initHDiscount;
-			gDiscount = initGDiscount;
-		}
+		//log("lvl"+LEVEL+": config.spec="+JSON.stringify(config.spec));
+		//TODO: use the specs to guide search! if a spec has no "..." or "until" in it, we can try it as a solution (maybe assuming a "..." on the end?). if it has a "..." but only at the end, likewise!
+	// 	if(config.spec && config.spec.prefixes && config.spec.prefixes.length) {
+	// 		hDiscount = 0;
+	// 		gDiscount = 0;
+	// 		var spec = config.spec;
+	// 		for(var hi=0; hi < spec.prefixes.length; hi++) {
+	// 			var node = root;
+	// 			for(var ai=0; ai < spec.prefixes[hi].length; ai++) {
+	// 				var specI = spec.prefixes[hi][ai];
+	// 				if(specI == DOTDOTDOT) {
+	// 					//just skip it for now
+	// 				} else {
+	// 					if(q.length==0) {
+	// 						log("Got a win earlier than expected");
+	// 						break;
+	// 					}
+	// 					node.actions.splice(node.actions.indexOf(spec.prefixes[hi][ai]));
+	// 					node.actions.push(spec.prefixes[hi][ai]);
+	// 					node = expand(0, node);
+	// 				}
+	// 			}
+	// 		}
+	// 		if(q.length != 0) {
+	// 			Solver.REPLY_FN("specInsufficient", {
+	// 				level:Solver.LEVEL,
+	// 				spec:config.spec,
+	// 				queueLength:q.length,
+	// 				nodeCount:nodeId,
+	// 				minG:(q.peek() ? q.peek().g : -1),
+	// 				minH:(q.peek() ? q.peek().h : -1),
+	// 				time:Solver.timeSinceStart()
+	// 			});
+	// 		}
+	// 		hDiscount = initHDiscount;
+	// 		gDiscount = initGDiscount;
+	// 	}
 		return {continuation:0};
 	};
 	
@@ -217,7 +225,7 @@ var SolverCautious = (function() {
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
 			var node = q.shift();
-			//because of weirdness with hints and our inability to delete items from the queue, our q might have noise in it.
+			//because of weirdness with specs and our inability to delete items from the queue, our q might have noise in it.
 			if(node.actions.length == 0) { 
 				continue; 
 			}
@@ -373,9 +381,34 @@ var SolverCautious = (function() {
 		//log("Returning "+JSON.stringify(ret)+" for "+n.id);
 		return ret;
 	}
+	
+	function calculateMatchedSpecsByPrefix(prefixes, currentNode) {
+		var resultByPrefix = prefixes.map(function(prefix) {
+			switchToSearchState(root);
+			var states = [];
+			for(var p = 0; p < prefix.length; p++) {
+				var dir = prefix[p];
+				runCompleteStep(dir);
+				states.push({
+					move:dir,
+					winning:winning,
+					state:new Int32Array(level.objects)
+				});
+			}
+			var result = [];
+			for(var s = 0; s < specs.length; s++) {
+				switchToSearchState(root);
+				result[s] = specs[s].match(states);
+			}
+			return result;
+		});
+		switchToSearchState(currentNode);
+		return resultByPrefix;
+	}
 
 	function postSolution(currentNode, iter) {
 		var prefixes = FIRST_SOLUTION_ONLY ? [currentNode.firstPrefix] : prefixes(currentNode);
+		var matchedSpecs = calculateMatchedSpecsByPrefix(prefixes, currentNode);
 		Solver.postSolution({
 			id:currentNode.id,
 			backup:currentNode.backup,
@@ -383,6 +416,7 @@ var SolverCautious = (function() {
 			h:currentNode.h,
 			f:currentNode.f,
 			prefixes:prefixes,
+			matchedSpecsByPrefix:matchedSpecs,
 			ruleCounts:prefixes.map(function(p){ 
 				var counts = Solver.getRuleCounts(p)[Solver.LEVEL];
 				//HACK: For some bizarre reason, counts is sometimes null.

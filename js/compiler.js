@@ -480,11 +480,8 @@ function compile2DPattern(patID,lineNo,pat) {
 					}
 					isAll = false;
 				}
-				if(!mask && !maskint) {
-					logError('Error, symbol "' + ch + '", used in 2D pattern, not found.', lineNo+j);
-				}
 			}
-			if(!maskint) {
+			if(mask && !maskint) {
 				maskint = new BitVec(STRIDE_OBJ);
 				mask = mask.slice();
 				for(var z = 0; z < layerCount; z++) {
@@ -492,6 +489,9 @@ function compile2DPattern(patID,lineNo,pat) {
 						maskint.ibitset(mask[z]);
 					}
 				}
+			}
+			if(!maskint) {
+				logError('Error, symbol "' + ch + '", used in 2D pattern, not found.', lineNo+j);
 			}
 			maskint.ior(levelBackgroundMask);
 			for(var w = 0; w < STRIDE_OBJ; ++w) {
@@ -2656,6 +2656,7 @@ function compile(command,text,randomseed) {
 var global = this;
 
 function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
+	prefix = prefix || "";
 	var dir = rule.direction;
 	var delta = prefix+"delta";
 	var matchChecks = [];

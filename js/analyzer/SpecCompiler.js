@@ -7,34 +7,34 @@ var SpecCompiler = (function() {
 	
 	var winningRE = /^winning\b/i;
 	var finishedRE = /^finished\b/i;
-	var ellipsesRE = /^([0-9]+)?\.\.\.(infinity|[0-9]+)?(?=\s|\))/;
+	var ellipsesRE = /^([0-9]+)?\.\.\.(infinity(?=\W)|[0-9]+)?/i;
 	
-	var thenRE = /^(then|\,)\b/i;
+	var thenRE = /^(then\b|\,)/i;
 	var untilRE = /^until\b/i;
-	var andRE = /^(and|\&)\b/i;
-	var orRE = /^(or|\|)\b/i;
-	var notRE = /^(not|\~)\b/i;
-	var impliesRE = /^(implies|\=\>)\b/i;
-	var iffRE = /^(iff|\<\=\>)\b/i;
+	var andRE = /^(and\b|\&)/i;
+	var orRE = /^(or\b|\|)/i;
+	var notRE = /^(not\b|\~)/i;
+	var impliesRE = /^(implies\b|\=\>)/i;
+	var iffRE = /^(iff\b|\<\=\>)/i;
 	var lparenRE = /^\(/;
 	var rparenRE = /^\)/;
-	var spaceRE = /\s+/;
+	var spaceRE = /^\s+/;
 	var permuteRE = /^permute\b/i;
 	
 	//move: up or down or left or right
 	//input: up or down or left or right or act
 	//any: up or down or left or right or act or wait
-	var directionRE = /^(up|down|left|right|\^|\>|\<|v|moving|action|x|input|wait|any)\b/i;
+	var directionRE = /^(up\b|down\b|left\b|right\b|\^|\>|\<|v\b|moving\b|action\b|x\b|input\b|wait\b|any\b)/i;
 	//(at Pos)? 2d (...)
-	var pattern2DRE = /^(2d\s*\(\s*)((.|\s)+)(\s*)\)\s*d2/i;
+	var pattern2DRE = /^(2d\s*\(\s*)((.|\s)+)(\s*)\)\s*d2(?=\W)/i;
 	//(at Pos)? Dir? [rule]
-	var pattern1DRE = /^(?:(up|down|left|right|horizontal|vertical)\b)?\[([^\]]*)\]/i;
+	var pattern1DRE = /^(?:(up|down|left|right|horizontal|vertical)\s*)?\[([^\]]*)\]/i;
 
 	var winConditionRE = /^(?:(?:(no|some)\s+(\S+)(?:\s+on\s+(\S+))?)|(?:all\s+(\S+)\s+on\s+(\S+))|(?:(at least|at most|exactly)?\s+([0-9]+)\s+(\S+)(?:\s+on\s+(\S+))?))/i;
 
 	var fireRE = /^fire(?:\s+(up|down|left|right|horizontal|vertical|any))?\s+(\w+)(?:\s+(at least|at most|exactly)?\s+([0-9]+)\s+times)?\b/i;
 	var intRE = /^0|(?:[1-9][0-9]*)/;
-	var identifierRE = /^\w+\b/;
+	var identifierRE = /^\w+/;
 	
 	function matchSymbol(re, name, metatype) {
 		return function(str, pos) {
@@ -132,7 +132,7 @@ var SpecCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseSpec(stream, 1);
+				var rhs = parseSpec_(stream, 1);
 				var steps;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is not vital for then's semantics, but it's convenient
@@ -160,7 +160,7 @@ var SpecCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseSpec(stream, 2);
+				var rhs = parseSpec_(stream, 2);
 				var steps;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for until's semantics. Groups
@@ -193,7 +193,7 @@ var SpecCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseSpec(stream, 5);
+				var rhs = parseSpec_(stream, 5);
 				var conjuncts;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for and's semantics. Groups
@@ -232,7 +232,7 @@ var SpecCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseSpec(stream, 6);
+				var rhs = parseSpec_(stream, 6);
 				var disjuncts;
 				//Re-associating to produce an n-ary operator (in practice, I think we should only hit the second case).
 				//Groups will not be distributed through. This is important for and's semantics. Groups
@@ -271,7 +271,7 @@ var SpecCompiler = (function() {
 			nud:noNud,
 			led:function(tok,stream,lhs) {
 				//left-associative n-ary operator
-				var rhs = parseSpec(stream, 3);
+				var rhs = parseSpec_(stream, 3);
 				return {parse:{
 					type:"implies", 
 					metatype:anyIsTemporal([lhs,rhs.parse]) ? "temporal" : "predicate", value:{
@@ -288,7 +288,7 @@ var SpecCompiler = (function() {
 			match:matchSymbol(iffRE, "iff"),
 			nud:noNud,
 			led:function(tok,stream,lhs) {
-				var rhs = parseSpec(stream, 4);
+				var rhs = parseSpec_(stream, 4);
 				return {parse:{
 					type:"iff", 
 					metatype:anyIsTemporal([lhs,rhs.parse]) ? "temporal" : "predicate", value:{
@@ -309,7 +309,7 @@ var SpecCompiler = (function() {
 				return {type:"not", metatype:"predicate", value:{}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok,stream) {
-				var parse = parseSpec(stream,7);
+				var parse = parseSpec_(stream,7);
 				if(parse.parse.type == "ellipses") {
 					throw new Error("Can't put ellipses into a not by itself");
 				}
@@ -338,7 +338,7 @@ var SpecCompiler = (function() {
 				//permute A B C --> ((... then A) and (... then B) and (... then C))
 				var parse;
 				do {
-					parse = parseSpec(stream,0);
+					parse = parseSpec_(stream,0);
 					if(parse.parse.type == "ellipses") {
 						throw new Error("Can't put ellipses into a permute by itself");
 					}
@@ -376,7 +376,7 @@ var SpecCompiler = (function() {
 			type:"lparen",
 			match:matchSymbol(lparenRE, "lparen"),
 			nud:function(tok,stream) {
-				var parse = parseSpec(stream,0);
+				var parse = parseSpec_(stream,0);
 				if(parse.parse.type == "ellipses") {
 					throw new Error("Can't put ellipses into a group by themselves");
 				}
@@ -454,7 +454,7 @@ var SpecCompiler = (function() {
 				dirs["<"] = dirs.left;
 				dirs["v"] = dirs.down;
 				dirs[">"] = dirs.right;
-				dirs["x"] = dits.action;
+				dirs["x"] = dirs.action;
 				var inputDir = (dir in dirs) ? dirs[dir] : -1;
 				return {type:"direction", metatype:"predicate", value:{
 					direction:dir,
@@ -504,7 +504,7 @@ var SpecCompiler = (function() {
 					if(!firstRealLine) { firstRealLine = lines[l]; }
 					var linePos = {line:pos.line+l+preMapLines,ch:rawLines[l].indexOf(lines[l].charAt(0))};
 					firstRealLinePos = linePos;
-					realLines.push(lines[l]);
+					realLines.push(lines[l].toLowerCase());
 					if(lines[l].length != firstRealLine.length) {
 						throw new Error("Invalid 2d pattern: "+lines[l]+"("+linePos+") of length "+lines[l].length+"; should have length "+firstRealLine.length+" to match first line "+firstRealLine+" ("+firstRealLinePos+")");
 					}
@@ -514,6 +514,7 @@ var SpecCompiler = (function() {
 				var endPos = {line:pos.line+allLines.length-1, ch:lastLine.length-1};
 				return {type:"pattern2D", metatype:"predicate", value:{
 					pattern:realLines,
+					compiledPattern:null,
 					firstLine:firstRealLinePos.line
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
@@ -531,36 +532,9 @@ var SpecCompiler = (function() {
 				if(!match) { return null; }
 				var lines = match[0].split("\n");
 				var endPos = {line:pos.line + lines.length - 1, ch:lines[lines.length-1].length};
-				var fakeState = {
-					rules:[[match[0].toLowerCase(),pos.line,match[0]]],
-					loops:[],
-					propertiesDict:state.propertiesDict,
-					names:state.names,
-					propertiesSingleLayer:state.propertiesSingleLayer,
-					synonymsDict:state.synonymsDict,
-					aggregatesDict:state.aggregatesDict,
-					collisionLayers:state.collisionLayers,
-					objects:state.objects,
-					objectMasks:state.objectMasks,
-					layerMasks:state.layerMasks,
-					playerMask:state.playerMask
-				};
-				//use the existing compiler machinery!
-				rulesToArray(fakeState);
-				removeDuplicateRules(fakeState);
-				rulesToMask(fakeState);
-				arrangeRulesByGroupNumber(fakeState);
-				collapseRules(fakeState.rules);
-				if(fakeState.rules.length > 1) {
-					throw new Error("More rule groups than expected!");
-				}
-				for(var i = 0; i < fakeState.rules[0].length; i++) {
-					if(fakeState.rules[0][i].patterns.length != 1) {
-						throw new Error("A 1D pattern had more than one pattern!");
-					}
-				}
 				return {type:"pattern1D", metatype:"predicate", value:{
-					rules:fakeState.rules[0]
+					ruleText:match[0],
+					compiledRules:null
 				}, range:{start:pos,end:endPos}, length:match[0].length};
 			},
 			nud:function(tok, stream) {
@@ -615,7 +589,7 @@ var SpecCompiler = (function() {
 		return {token:token, string:str, position:pos};
 	}
 	
-	function parseSpec(stream,rbp) {
+	function parseSpec_(stream,rbp) {
 		if(rbp == undefined) { rbp = 0; }
 		/*
     t,stream = consumeToken(stream)
@@ -670,10 +644,12 @@ var SpecCompiler = (function() {
 		 | Spec
 		*/
 	}
+	
+	function parseSpec(str,pos) {
+		return parseSpec_({token:null,string:str,position:pos}, 0);
+	}
 	module.parseSpec = parseSpec;
 	
-	var AGAIN_LIMIT = 100;
-
 	function nextStepStmt(tA,fA) {
 		if(tA == null || fA == null) { return new Error("Next steps always have a risk of failure"); }
 		return unwindStateStmt("si + 1",tA,fA);
@@ -686,7 +662,8 @@ var SpecCompiler = (function() {
 	function unwindStateStmt(si0,tA,fA) {
 		var main = [
 			"si = "+si0+";",
-			"level.objects = states[si].state;"
+			"level.objects = states[si].state;",
+			"calculateRowColMasks();"
 		].concat(tA || []);
 		if(!fA) {
 			return main.join("\n");
@@ -812,8 +789,8 @@ var SpecCompiler = (function() {
 								var si0 = "si0_"+specID+"_"+i;
 								var anyPassed = "anyPassed_"+specID+"_"+i;
 								var label = "loopEllipses_"+specID+"_"+i;
-								var minLength = spec.value.minLength;
-								var maxLength = spec.value.maxLength;
+								var minLength = step.value.minLength;
+								var maxLength = step.value.maxLength;
 								var ellipsesEnd = "ellipsesEnd"+specID+"_"+i;
 								return unwindStateStmt("si + "+minLength, 
 									[
@@ -944,27 +921,60 @@ var SpecCompiler = (function() {
 					range:spec.range
 				}, rest, trueA, falseA);
 			case "finished":
-				return evaluatePredicate(["result = si == steps.length-1;"], rest, trueA, falseA);
+				return evaluatePredicate(["result = si == states.length-1;"], rest, trueA, falseA);
 			case "winning":
-				return evaluatePredicate(["result = winning;"], rest, trueA, falseA);
+				return evaluatePredicate(["result = states[si].winning;"], rest, trueA, falseA);
 			case "direction":
 				switch(spec.value.direction) {
 					case "any":
 						return evaluatePredicate(["result = true;"], rest, trueA, falseA);
 					case "wait":
-						return evaluatePredicate(["result = states[si].step == -1;"], rest, trueA, falseA);
+						return evaluatePredicate(["result = states[si].move == -1;"], rest, trueA, falseA);
 					case "input":
-						return evaluatePredicate(["result = states[si].step != -1;"], rest, trueA, falseA);
+						return evaluatePredicate(["result = states[si].move != -1;"], rest, trueA, falseA);
 					case "moving":
-						return evaluatePredicate(["result = states[si].step >= 0 && states[si].step <= 3;"], rest, trueA, falseA);
+						return evaluatePredicate(["result = states[si].move >= 0 && states[si].move <= 3;"], rest, trueA, falseA);
 					default:
-						return evaluatePredicate(["result = states[si].step == "+spec.value.inputDir+";"], rest, trueA, falseA);
+						return evaluatePredicate(["result = states[si].move == "+spec.value.inputDir+";"], rest, trueA, falseA);
 				}			
 			case "pattern1D":
+				rules = spec.value.compiledRules;
+				if(!rules) {
+					var text = spec.value.ruleText;
+					var fakeState = {
+						rules:[[text.toLowerCase(),spec.range.start.line,text]],
+						loops:[],
+						propertiesDict:state.propertiesDict,
+						names:state.names,
+						propertiesSingleLayer:state.propertiesSingleLayer,
+						synonymsDict:state.synonymsDict,
+						aggregatesDict:state.aggregatesDict,
+						collisionLayers:state.collisionLayers,
+						objects:state.objects,
+						objectMasks:state.objectMasks,
+						layerMasks:state.layerMasks,
+						playerMask:state.playerMask
+					};
+					//use the existing compiler machinery!
+					rulesToArray(fakeState);
+					removeDuplicateRules(fakeState);
+					rulesToMask(fakeState);
+					arrangeRulesByGroupNumber(fakeState);
+					collapseRules(fakeState.rules);
+					if(fakeState.rules.length > 1) {
+						throw new Error("More rule groups than expected!");
+					}
+					for(var i = 0; i < fakeState.rules[0].length; i++) {
+						if(fakeState.rules[0][i].patterns.length != 1) {
+							throw new Error("A 1D pattern had more than one pattern!");
+						}
+					}
+					rules = fakeState.rules[0];
+				}
 				var anyTrue = "p1d_anyTrue_"+specID;
 				var checks = ["var "+anyTrue+" = false;"];
-				for(var i = 0; i < spec.value.rules.length; i++) {
-					var rule = spec.value.rules[i];
+				for(var i = 0; i < rules.length; i++) {
+					var rule = rules[i];
 					//We know that these kinds have rule have only one pattern.
 					var matchFn = "spec_"+spec.range.start.line+"_"+specID+"_p1d_match_"+i;
 					compileMatchFunction(state, matchFn, rule, 0);
@@ -976,7 +986,10 @@ var SpecCompiler = (function() {
 				}
 				return checks.concat(["if(!"+anyTrue+") {"]).concat(falseA).concat(["}"]);
 			case "pattern2D":
-				var pattern = compile2DPattern(specID, spec.value.firstRealLine, spec.value.pattern);
+				var pattern = spec.value.compiledPattern;
+				if(!pattern) {
+					pattern = compile2DPattern(specID, spec.value.firstRealLine, spec.value.pattern);
+				}
 				var anyPassed = "anyPassed_"+specID;
 				var triedRows = "triedRows_"+specID;
 				var triedCols = "triedCols_"+specID;
@@ -1093,11 +1106,9 @@ var SpecCompiler = (function() {
 		}
 	}
 	
-	module.compileSpec = function compileSpec(str,pos) {
+	module.compileSpec = function compileSpec(prefix,spec) {
+		prefix = prefix || "";
 		specID = 0;
-		var result = parseSpec({token:null,string:str,position:pos}, 0);
-		var spec = result.parse;
-		result.remainder = result.stream.string;
 		//now, compile to a function which ensures the spec is valid, starting from some arbitrary initial state.
 		var specFnPre = [
 			"var initObjects = level.objects;",
@@ -1118,11 +1129,12 @@ var SpecCompiler = (function() {
 			],
 			[]
 		);
-		var specFn = prettify(["function spec_"+pos.line+"(states, matchFn) {","console.log('spec');"].concat(specFnPre).concat(generated).concat(specFnPost).join("\n"));
+		var fnName = prefix+"spec";
+		var specFn = prettify(["function "+fnName+"(states, matchFn) {","console.log('spec');"].concat(specFnPre).concat(generated).concat(specFnPost).join("\n"));
 		evalCode(specFn);
-		result.spec = {
-			name:"spec_"+pos.line,
-			match:global["spec_"+pos.line]
+		result = {
+			name:fnName,
+			match:global[fnName]
 		};
 		return result;
 	}

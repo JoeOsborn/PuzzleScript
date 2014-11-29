@@ -65,7 +65,11 @@ var SolverCautious = (function() {
 	var notPlayerMask;
 	
 	var specs;
-
+	
+	var pooledBackups = [];
+	var pooledBackupsCount = -1;
+	var backupRestores = 0, backupClears = 0;
+	
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
@@ -73,7 +77,8 @@ var SolverCautious = (function() {
 		notPlayerMask.iflip();
 		nodeId=0;
 		seenPlayerPositions = {};
-
+		backupRestores = 0;
+		backupClears = 0;
 		var parsedSpecs = config.spec || [];
 		specs = [];
 		for(var s = 0; s < parsedSpecs.length; s++) {
@@ -232,7 +237,7 @@ var SolverCautious = (function() {
 			if(member(node,closed)) { 
 				warn("found a closed node "+node.id); 
 				//TODO: memory reduction
-				// node.backup = null;
+				clearBackup(node);
 				continue; 
 			}
 			//log("Dat:"+JSON.stringify(node.backup));
@@ -241,17 +246,17 @@ var SolverCautious = (function() {
 				//TODO: should it be put into closed?
 				continue;
 			}
-				//TODO: memory reduction
-			// if(node.backup == null) {
-			// 	throw new Error("An open node had its backup removed! Too late to fix it!");
-			// }
+			//TODO: memory reduction
+			if(node.backup == null) {
+				throw new Error("An open node had its backup removed! Too late to fix it!");
+			}
 			expand(iter,node);
 			if(node.actions.length == 0) {
 				//Don't shift here! The first element in the queue might have changed!
 				exactRemove(node,open);
 				exactInsert(node,closed);
 				//TODO: memory reduction
-				// node.backup = null;
+				clearBackup(node);
 			} else if(!(sentSolution && FIRST_SOLUTION_ONLY)) {
 				node.f = node.g + node.actionHs[node.actionHs.length-1];
 				q.push(node);
@@ -289,6 +294,28 @@ var SolverCautious = (function() {
 					fullyExhausted:q.length == 0
 				}
 			};
+		}
+	}
+
+	
+	function clearBackup(node) {
+		pooledBackupsCount++;
+		pooledBackups[pooledBackupsCount] = node.backup;
+		node.backup = null;
+		backupClears++;
+		if(backupClears % 1000 == 0) {
+			console.log("Backup clears:"+backupClears);
+		}
+	}
+	
+	function setBackup(node) {
+		if(pooledBackupsCount < 0 || !pooledBackups[pooledBackupsCount]) {
+			node.backup = backupLevel();
+		} else {
+			node.backup = pooledBackups[pooledBackupsCount];
+			pooledBackups[pooledBackupsCount] = null;
+			pooledBackupsCount--;
+			backupLevel(node.backup);
 		}
 	}
 
@@ -590,11 +617,6 @@ var SolverCautious = (function() {
 			closedCyclePoints[existingInClosed.key0][existingInClosed.key1]++;
 		}
 		var existingN = existingInClosed || existingInOpen;
-		//if we are reopening a node, give it a backup again.
-				//TODO: memory reduction
-		// if(!existingN.backup) {
-		// 	existingN.backup = backupLevel();
-		// }
 		var g = pred ? pred.g+gDiscount : 0;
 		if(existingN) {
 			if(pred) {
@@ -608,6 +630,15 @@ var SolverCautious = (function() {
 				// if(existingInOpen) {
 				//	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
+				//if we are reopening a node, give it a backup again.
+				//TODO: memory reduction
+				if(!existingN.backup) {
+					backupRestores++;
+					if(backupRestores % 1000 == 0) {
+						console.log("Backup restores:"+backupRestores);
+					}
+					setBackup(existingN);
+				}
 				if(existingInOpen && existingN.actions.length > 0) {
 					//let's just live with duplicate items!
 					var opposite = OPPOSITE_ACTIONS[action];
@@ -639,7 +670,7 @@ var SolverCautious = (function() {
 			id:nodeId,
 			actions:ACTIONS.slice(),
 			actionHs:new Array(ACTIONS.length),
-			backup:backupLevel(),
+			backup:null,
 			predecessors:pred ? [{action:action, predecessor:pred}] : [],
 			firstPrefix:pred ? pred.firstPrefix.slice() : [],
 			winning:winning,
@@ -650,6 +681,7 @@ var SolverCautious = (function() {
 			minusPlayerKey:minusPlayerKey,
 			f:g+h, g:g, h:h
 		};
+		setBackup(n);
 		
 		for(var ai = 0; ai < ACTIONS.length; ai++) {
 			n.actionHs[ai] = h;

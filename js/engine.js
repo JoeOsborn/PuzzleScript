@@ -497,14 +497,26 @@ function tryPlayCloseMessageSound(){
 var backups=[];
 var restartTarget;
 
-function backupLevel() {
-	var ret = {
-		dat : new Int32Array(level.objects),
-		width : level.width,
-		height : level.height,
-		oldflickscreendat: oldflickscreendat ? oldflickscreendat.slice() : []
-	};
-	return ret;
+var bakAllocs = 0;
+
+function backupLevel(inBak) {
+	var bak = inBak;
+	if(!bak) {
+		bakAllocs++;
+		if(bakAllocs % 1000 == 0) { console.log("Bak Allocs:"+bakAllocs); }
+		bak = {dat:new Int32Array(level.objects),width:level.width,height:level.height};
+	} else {
+		if(bak.dat.length != level.objects.length) {
+			bakAllocs++;
+			if(bakAllocs % 1000 == 0) { console.log("Bak Allocs:"+bakAllocs); }
+			bak.dat = new Int32Array(level.objects);
+		} else {
+			bak.dat.set(level.objects);
+		}
+		bak.width = level.width;
+		bak.height = level.height;
+	}
+	return bak;
 }
 
 function setGameState(_state, command, randomseed) {
@@ -725,6 +737,10 @@ function RebuildLevelArrays() {
 	_o10 = new BitVec(STRIDE_OBJ);
 	_o11 = new BitVec(STRIDE_OBJ);
 	_o12 = new BitVec(STRIDE_OBJ);
+	_o13 = new BitVec(STRIDE_OBJ);
+	for(var ri = 0; ri < randTable.length; ri++) {
+		randTable[ri] = Math.random()*256 | 0;
+	}
 	sfxCreateMask = new BitVec(STRIDE_OBJ);
 	sfxDestroyMask = new BitVec(STRIDE_OBJ);
 	_m1 = new BitVec(STRIDE_MOV);
@@ -1401,7 +1417,7 @@ CellPattern.prototype.toJSON = function() {
 	];
 };
 
-var _o1,_o2,_o2_5,_o3,_o4,_o5,_o6,_o7,_o8,_o9,_o10,_o11,_o12;
+var _o1,_o2,_o2_5,_o3,_o4,_o5,_o6,_o7,_o8,_o9,_o10,_o11,_o12,_o13;
 var _m1,_m2,_m3,_m4,_m5,_m6;
 
 var _replaceChoices = [];
@@ -2270,17 +2286,123 @@ function dirToBits(dir) {
 	}
 }
 
-var AGAIN_LIMIT = 100;
-function runCompleteStep(inputDir) {
-	var again = 0;
-	var anyResults = processInput(inputDir,false,false,null,false,true);
-	while(againing && again <= AGAIN_LIMIT) {
-		anyResults = processInput(-1,false,false,null,false,true) || anyResults;
-		//TODO: detect loops with a hash code?
-		again++;
+
+//Calculate a Jenkins one-at-a-time hash for the current level data.
+//Takes an optional argument "rearrangeMask".
+//Any groups of objects matching `rearrangeMask` will be removed from its position
+//in the level and hashed in order of appearance at the end of the level
+//data. For example, given:
+// level = [Crate | Target | Player Shadow | Target | Crate]
+// rearrangeMask = Crate | Player | Shadow
+//The hashed "string" will be:
+// "[Background | Target Background | Background | Target Background | Background] ++ [Crate | Player Shadow | Crate]".
+var randTable = new Int8Array(256);
+var rearranged = [];
+var rearrangedCount = 0;
+function hashKey(rearrangeMask) {
+	var h = 0|0;
+	var l = STRIDE_OBJ;
+	var tiles = level.n_tiles;
+	rearrangedCount = 0;
+	for(var i = 0; i < tiles; i++) {
+		level.getCellInto(i,_o13);
+		if(rearrangeMask) {
+			if(!rearranged[rearrangedCount]) {
+				rearranged[rearrangedCount] = _o13.clone();
+			} else {
+				_o13.cloneInto(rearranged[rearrangedCount]);
+			}
+			rearranged[rearrangedCount].iand(rearrangeMask);
+			rearrangedCount++;
+			_o13.iclear(rearrangeMask);
+		}
+		var bitmask = _o13.data;
+		for(var d = 0; d < l; d++) {
+			h += (randTable[bitmask[d]&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			h += (randTable[(bitmask[d]>>8)&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			h += (randTable[(bitmask[d]>>16)&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			h += (randTable[(bitmask[d]>>24)&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+		}
 	}
-	if(again >= AGAIN_LIMIT) {
-		error("Too many again loops!");
+	for(i = 0; i < rearrangedCount; i++) {
+		var bitmask = rearranged[i].data;
+		for(var d = 0; d < l; d++) {
+			h += (randTable[bitmask[d]&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			h += (randTable[(bitmask[d]>>8)&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			h += (randTable[(bitmask[d]>>16)&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+			h += (randTable[(bitmask[d]>>24)&0x000000FF])|0;
+			h += (h << 10)|0;
+			h ^= (h >> 6)|0;
+		}
+	}
+	h += ( h << 3 )|0;
+	h ^= ( h >> 11 )|0;
+	h += ( h << 15 )|0;
+	return h;
+}
+
+var AGAIN_LIMIT = 100;
+var againSet = [];
+function runCompleteStep(inputDir) {
+	var againIters = 0;
+	var undoStackLength = backups.length;
+	var anyResults = processInput(inputDir,false,false,null,false,true);
+	var againLooped = false;
+	while(againing && againIters < AGAIN_LIMIT && !winning) {
+		if(!againSet[againIters]) {
+			againSet[againIters] = {hash:0|0, backup:null};
+		}
+		againSet[againIters].backup = backupLevel(againSet[againIters].backup);
+
+		var hash = hashKey(null);
+		againSet[againIters].hash = hash;
+		for(var i = 0; i < againIters; i++) {
+			var againInstance = againSet[i];
+			if(againInstance.hash == hash) {
+				for(var j = 0; j < level.n_tiles*STRIDE_OBJ; j++) {
+					if(level.objects[j] != againInstance.backup.dat[j]) {
+						break;
+					}
+				}
+				if(j == level.n_tiles*STRIDE_OBJ) {
+					againLooped = true;
+					break;
+				}
+			}
+		}
+		if(againLooped) {
+			warn("Encountered infinite AGAIN loop. Cancelling move.");
+			break;
+		}
+		
+		anyResults = processInput(-1,false,false,againSet[againIters].backup,false,true) || anyResults;
+		againIters++;
+	}
+	if(againIters >= AGAIN_LIMIT) {
+		warn("Too many again iterations; assuming an undetected infinite loop.");
+		againLooped = true;
+	}
+	if(againLooped) {
+		//If we hit an infinite again loop, just pretend like this move did nothing.
+		backups.splice(undoStackLength,backups.length-undoStackLength);
+		if(backups.length) {
+			DoUndo(true);
+		}
+		anyResults = false;
 	}
 	return anyResults;
 }
@@ -2303,7 +2425,7 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	var bak;
 	if(premadeBackup) { 
 		bak = premadeBackup; 
-	} else { 
+	} else {
 		bak = backupLevel(); 
 	}
 	clearCommands();

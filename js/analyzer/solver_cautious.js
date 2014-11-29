@@ -48,6 +48,8 @@ var SolverCautious = (function() {
 	var sentSolution = false;
 	var bestSolution;
 
+	var AGAIN_LIMIT = 100;
+	var againSet = [];
 	var nodeId=0;
 	var open, closed, q;
 	var root;
@@ -56,7 +58,6 @@ var SolverCautious = (function() {
 	var seenPlayerPositions = {};
 	
 	var randTable = new Int8Array(256);
-	var randTable2 = new Int8Array(256);
 	
 	var MAP_SIZE=0|0; // in bytes
 	var NODE_LIMIT=Infinity;
@@ -87,7 +88,6 @@ var SolverCautious = (function() {
 		
 		for(var ri = 0; ri < randTable.length; ri++) {
 			randTable[ri] = Math.random()*256 | 0;
-			randTable2[ri] = Math.random()*256 | 0;
 		}
 		
 		if(Solver.MODE == "fast") {
@@ -126,7 +126,7 @@ var SolverCautious = (function() {
 		closed = initSet();
 		//Sort by F, break ties by H.
 		q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); });
-				
+		
 		var initHDiscount = hDiscount;
 		var initGDiscount = gDiscount;
 		hDiscount = 0;
@@ -231,18 +231,27 @@ var SolverCautious = (function() {
 			}
 			if(member(node,closed)) { 
 				warn("found a closed node "+node.id); 
+				//TODO: memory reduction
+				// node.backup = null;
 				continue; 
 			}
 			//log("Dat:"+JSON.stringify(node.backup));
-			//just close nodes with best paths longer than or equal to gLimit.
+			//just skip nodes with best paths longer than or equal to gLimit.
 			if(node.g >= gLimit) { 
+				//TODO: should it be put into closed?
 				continue;
 			}
+				//TODO: memory reduction
+			// if(node.backup == null) {
+			// 	throw new Error("An open node had its backup removed! Too late to fix it!");
+			// }
 			expand(iter,node);
 			if(node.actions.length == 0) {
 				//Don't shift here! The first element in the queue might have changed!
 				exactRemove(node,open);
 				exactInsert(node,closed);
+				//TODO: memory reduction
+				// node.backup = null;
 			} else if(!(sentSolution && FIRST_SOLUTION_ONLY)) {
 				node.f = node.g + node.actionHs[node.actionHs.length-1];
 				q.push(node);
@@ -282,7 +291,7 @@ var SolverCautious = (function() {
 			};
 		}
 	}
-	var AGAIN_LIMIT = 100;
+
 	function expand(iter,node) {
 		var action = node.actions.pop();
 		var actionH = node.actionHs.pop();
@@ -294,19 +303,48 @@ var SolverCautious = (function() {
 		if(cmd_checkpoint) {
 			//TODO: bump this node's H value?
 		}
+		var againLooped = false;
 		var againIters = 0;
 		while(againing && againIters < AGAIN_LIMIT) {
-			processInput(-1,false,false,null,true,true);
+			if(!againSet[againIters]) {
+				againSet[againIters] = {hash:0|0, backup:null};
+			}
+			againSet[againIters].backup = backupLevel(againSet[againIters].backup);
+
+			var hash = hashKey(null);
+			againSet[againIters].hash = hash;
+			for(var i = 0; i < againIters; i++) {
+				var againInstance = againSet[i];
+				if(againInstance.hash == hash) {
+					for(var j = 0; j < level.n_tiles*STRIDE_OBJ; j++) {
+						if(level.objects[j] != againInstance.backup.dat[j]) {
+							break;
+						}
+					}
+					if(j == level.n_tiles*STRIDE_OBJ) {
+						againLooped = true;
+						break;
+					}
+				}
+			}
+			if(againLooped) {
+				//throw exception?
+				warn("Encountered infinite AGAIN loop. Treating this path as no-good.");
+				break;
+			}
+
+			processInput(-1,false,false,againSet[againIters].backup,true,true);
 			if(cmd_cancel || cmd_restart) { againing = false; }
-			//TODO: detect loops
 			againIters++;
 			if(cmd_checkpoint) {
 				//TODO: bump this node's H value?
 			}
 		}
 		if(againIters >= AGAIN_LIMIT) {
-			warn("Too many again loops");
+			warn("Too many again iterations; assuming an undetected infinite loop.");
+			againLooped = true;
 		}
+		if(againLooped) { return node; }
 		var currentNode = createOrFindNode(node,action,actionH);
 		//log("Found "+currentNode.id+" by "+node.id +":"+action);
 		//if this is winning, report a win
@@ -383,6 +421,7 @@ var SolverCautious = (function() {
 	}
 	
 	function calculateMatchedSpecsByPrefix(prefixes, currentNode) {
+		console.log("Calculating matched specs:"+JSON.stringify(prefixes));
 		var resultByPrefix = prefixes.map(function(prefix) {
 			switchToSearchState(root);
 			var states = [];
@@ -434,64 +473,6 @@ var SolverCautious = (function() {
 			bestSolution =currentNode;
 		}
 	};
-
-	var rearranged = [];
-	var rearrangedCount = 0;
-	function hashKey(rearrangeMask) {
-		var h = 0|0;
-		var l = STRIDE_OBJ;
-		var tiles = level.n_tiles;
-		rearrangedCount = 0;
-		for(var i = 0; i < tiles; i++) {
-			level.getCellInto(i,_oA);
-			if(rearrangeMask) {
-				if(!rearranged[rearrangedCount]) {
-					rearranged[rearrangedCount] = _oA.clone();
-				} else {
-					_oA.cloneInto(rearranged[rearrangedCount]);
-				}
-				rearranged[rearrangedCount].iand(rearrangeMask);
-				rearrangedCount++;
-				_oA.iclear(rearrangeMask);
-			}
-			var bitmask = _oA.data;
-			for(var d = 0; d < l; d++) {
-				h += (randTable[bitmask[d]&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-				h += (randTable[(bitmask[d]>>8)&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-				h += (randTable[(bitmask[d]>>16)&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-				h += (randTable[(bitmask[d]>>24)&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-			}
-		}
-		for(i = 0; i < rearrangedCount; i++) {
-			var bitmask = rearranged[i].data;
-			for(var d = 0; d < l; d++) {
-				h += (randTable[bitmask[d]&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-				h += (randTable[(bitmask[d]>>8)&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-				h += (randTable[(bitmask[d]>>16)&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-				h += (randTable[(bitmask[d]>>24)&0x000000FF])|0;
-				h += (h << 10)|0;
-				h ^= (h >> 6)|0;
-			}
-		}
-		h += ( h << 3 )|0;
-		h ^= ( h >> 11 )|0;
-		h += ( h << 15 )|0;
-		return h;
-	}
 
 	function hashKey2Int(h, int32) {
 		h += (randTable[int32&0x000000FF])|0;
@@ -609,6 +590,11 @@ var SolverCautious = (function() {
 			closedCyclePoints[existingInClosed.key0][existingInClosed.key1]++;
 		}
 		var existingN = existingInClosed || existingInOpen;
+		//if we are reopening a node, give it a backup again.
+				//TODO: memory reduction
+		// if(!existingN.backup) {
+		// 	existingN.backup = backupLevel();
+		// }
 		var g = pred ? pred.g+gDiscount : 0;
 		if(existingN) {
 			if(pred) {

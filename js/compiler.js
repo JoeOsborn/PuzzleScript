@@ -2691,15 +2691,15 @@ function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
 		var y = prefix+"y_"+p;
 		var len = rule.patterns[p].length - (rule.isEllipsis[p] ? 1 : 0);
 
-		var xmin = 0;
-		var ymin = 0;
+		var xminDef = 0;
+		var yminDef = 0;
 		var xmaxDef = "level.width";
 		var ymaxDef = "level.height";
 
     switch(dir) {
     	case 1://up
     	{
-    		ymin+=(len-1);
+    		yminDef+=(len-1);
     		break;
     	}
     	case 2: //down 
@@ -2709,7 +2709,7 @@ function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
     	}
     	case 4: //left
     	{
-    		xmin+=(len-1);
+    		xminDef+=(len-1);
     		break;
     	}
     	case 8: //right
@@ -2718,13 +2718,28 @@ function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
 				break;
 			}
     }
+		var xmin = prefix+"xmin_"+p;
+		var ymin = prefix+"ymin_"+p;
+		body.push("var "+xmin+" = "+xminDef+";");
+		body.push("var "+ymin+" = "+yminDef+";");
 		var xmax = prefix+"xmax_"+p;
 		var ymax = prefix+"ymax_"+p;
 		body.push("var "+xmax+" = "+xmaxDef+";");
 		body.push("var "+ymax+" = "+ymaxDef+";");
+		
+		var ops = rule.patterns[p][0].objectsPresent.clone();
+		for(var obj = 0; obj < 32*STRIDE_OBJ; obj++) {
+			if(ops.get(obj)) {
+				body.push("if(level.objectFirstRows["+obj+"] > "+ymin+") { "+ymin+" = level.objectFirstRows["+obj+"]; }");
+				body.push("if(level.objectFirstCols["+obj+"] > "+xmin+") { "+xmin+" = level.objectFirstCols["+obj+"]; }");
+				body.push("if(level.objectLastRows["+obj+"]+1 < "+ymax+") { "+ymax+" = level.objectLastRows["+obj+"]+1; }");
+				body.push("if(level.objectLastCols["+obj+"]+1 < "+xmax+") { "+xmax+" = level.objectLastCols["+obj+"]+1; }");
+			}
+		}
+		
 		var horizontal = dir > 2;
 		if(horizontal) {
-			body.push("for(var "+y+" = "+ymin+"; "+y+" < "+ymax+"; "+y+"++) {");
+			body.push("for("+y+" = "+ymin+"; "+y+" < "+ymax+"; "+y+"++) {");
 			post.unshift("}");
 			var maskCheck = "if(!(";
 			for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
@@ -2736,10 +2751,13 @@ function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
 			maskCheck += ")) { continue; }";
 			body.push(maskCheck);
 			body.push(matchLabels[p]+":");
-			body.push("for(var "+x+" = "+xmin+"; "+x+" < "+xmax+"; "+x+"++) {");
-			post.unshift("}");
+			body.push("for("+x+" = "+xmin+"; "+x+" < "+xmax+"; "+x+"++) {");
+			post.unshift(
+				"}",
+				x+" = "+xmin+";"
+			);
 		} else {
-			body.push("for(var "+x+" = "+xmin+"; "+x+" < "+xmax+"; "+x+"++) {");
+			body.push("for("+x+" = "+xmin+"; "+x+" < "+xmax+"; "+x+"++) {");
 			post.unshift("}");
 			var maskCheck = "if(!(";
 			for(var idx = 0; idx < rule.cellRowMasks[p].data.length; idx++) {
@@ -2751,8 +2769,11 @@ function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
 			maskCheck += ")) { continue; }";
 			body.push(maskCheck);
 			body.push(matchLabels[p]+":");
-			body.push("for(var "+y+" = "+ymin+"; "+y+" < "+ymax+"; "+y+"++) {");
-			post.unshift("}");
+			body.push("for("+y+" = "+ymin+"; "+y+" < "+ymax+"; "+y+"++) {");
+			post.unshift(
+				"}",
+				y+" = "+ymin+";"
+			);
 		}
 		body.push("var "+idxs[p]+" = ("+x+" * level.height + "+y+")|0;");
 		var checkFnName = checkFns[p];
@@ -2937,6 +2958,7 @@ function compileCellReplaceFn(state, name, rule, pm, ci) {
 				choices.push(k);
 			}
 		}
+		body.push("var randomChoiceBit = 0;");
 		body.push("switch(Math.floor(RandomGen.uniform() * "+choices.length+")) {");
 		for(var k = 0; k < choices.length; k++) {
 			body.push("case "+k+":");
@@ -2945,6 +2967,7 @@ function compileCellReplaceFn(state, name, rule, pm, ci) {
 			var o = state.objects[n];
 			objectsSet.ibitset(rand);
 			objectsClear.ior(state.layerMasks[o.layer]);
+			body.push("randomChoiceBit = "+rand+";");
 			movementsClear.ishiftor(0x1f, 5 * o.layer);
 			for(var idx = 0; idx < STRIDE_OBJ; idx++) {
 				body.push(objectsClearedInts[idx]+" = "+objectsClear.data[idx]+";");
@@ -2998,11 +3021,30 @@ function compileCellReplaceFn(state, name, rule, pm, ci) {
 			body.push("}");
 		}
 	}
+	if(!replace.randomEntityMask.iszero()) {
+		body.push(
+			"level.objectFirstRows[randomChoiceBit] = Math.min(rowIndex,level.objectFirstRows[randomChoiceBit]);",
+			"level.objectFirstCols[randomChoiceBit] = Math.min(colIndex,level.objectFirstCols[randomChoiceBit]);",
+			"level.objectLastRows[randomChoiceBit] = Math.max(rowIndex,level.objectLastRows[randomChoiceBit]);",
+			"level.objectLastCols[randomChoiceBit] = Math.max(colIndex,level.objectLastCols[randomChoiceBit]);"
+		);
+	}
 	for(var idx = 0; idx < STRIDE_OBJ; idx++) {
 		body.push("level.objects[index*STRIDE_OBJ+"+idx+"] &= ~"+objectsClearedInts[idx]+";");
 		body.push("level.objects[index*STRIDE_OBJ+"+idx+"] |= "+objectsSetInts[idx]+";");
 		body.push("changed = changed || (level.objects[index*STRIDE_OBJ+"+idx+"] !== "+oldCellMaskInts[idx]+");");
 		
+		for(var bit = 0; bit < 32; bit++) {
+			var fullBit = idx*32+bit;
+			if(replace.objectsSet.get(fullBit)) {
+				body.push(
+					"level.objectFirstRows["+fullBit+"] = Math.min(rowIndex,level.objectFirstRows["+fullBit+"]);",
+					"level.objectFirstCols["+fullBit+"] = Math.min(colIndex,level.objectFirstCols["+fullBit+"]);",
+					"level.objectLastRows["+fullBit+"] = Math.max(rowIndex,level.objectLastRows["+fullBit+"]);",
+					"level.objectLastCols["+fullBit+"] = Math.max(colIndex,level.objectLastCols["+fullBit+"]);"
+				);
+			}
+		}
 		body.push("level.colCellContents[colIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
 		body.push("level.rowCellContents[rowIndex].data["+idx+"] |= "+objectsSetInts[idx]+";");
 		body.push("level.mapCellContents.data["+idx+"] |= "+objectsSetInts[idx]+";");

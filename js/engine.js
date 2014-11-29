@@ -703,6 +703,10 @@ function RebuildLevelArrays() {
 	
 	level.rigidMovementAppliedMask = [];
 	level.rigidGroupIndexMask = [];
+	level.objectFirstRows = new Int32Array(32*STRIDE_OBJ);
+	level.objectFirstCols = new Int32Array(32*STRIDE_OBJ);
+	level.objectLastRows = new Int32Array(32*STRIDE_OBJ);
+	level.objectLastCols = new Int32Array(32*STRIDE_OBJ);
 	level.rowCellContents = [];
 	level.colCellContents = [];
 	level.mapCellContents = new BitVec(STRIDE_OBJ);
@@ -737,6 +741,13 @@ function RebuildLevelArrays() {
 		level.colCellContents[i]=new BitVec(STRIDE_OBJ);	    	
 	}
 	
+	for(var i=0;i<32*STRIDE_OBJ;i++) {
+		level.objectFirstRows[i] = level.height;
+		level.objectFirstCols[i] = level.width;
+		level.objectLastRows[i] = 0;
+		level.objectLastCols[i] = 0;
+	}
+
 	for (var i=0;i<level.n_tiles;i++)
 	{
 		level.rigidMovementAppliedMask[i]=new BitVec(STRIDE_MOV);
@@ -909,29 +920,29 @@ var seedsToPlay_CantMove=[];
 
 function repositionEntitiesOnLayer(positionIndex,layer,dirMask) 
 {
-    var delta = dirMasksDelta[dirMask];
-
-    var dx = delta[0];
-    var dy = delta[1];
-    var tx = ((positionIndex/level.height)|0);
-    var ty = ((positionIndex%level.height));
-    var maxx = level.width-1;
-    var maxy = level.height-1;
-
-    if ( (tx===0&&dx<0) || (tx===maxx&&dx>0) || (ty===0&&dy<0) || (ty===maxy&&dy>0)) {
-    	return false;
-    }
-
-    var targetIndex = (positionIndex+delta[1]+delta[0]*level.height)%level.n_tiles;
-
-    var layerMask = state.layerMasks[layer];
-    var targetMask = level.getCellInto(targetIndex,_o7);
-    var sourceMask = level.getCellInto(positionIndex,_o8);
-
-    if (layerMask.anyBitsInCommon(targetMask) && (dirMask!=16)) {
-        return false;
-    }
-
+	var delta = dirMasksDelta[dirMask];
+	
+	var dx = delta[0];
+	var dy = delta[1];
+	var tx = ((positionIndex/level.height)|0);
+	var ty = ((positionIndex%level.height));
+	var maxx = level.width-1;
+	var maxy = level.height-1;
+	
+	if ( (tx===0&&dx<0) || (tx===maxx&&dx>0) || (ty===0&&dy<0) || (ty===maxy&&dy>0)) {
+		return false;
+	}
+	
+	var targetIndex = (positionIndex+delta[1]+delta[0]*level.height)%level.n_tiles;
+	
+	var layerMask = state.layerMasks[layer];
+	var targetMask = level.getCellInto(targetIndex,_o7);
+	var sourceMask = level.getCellInto(positionIndex,_o8);
+	
+	if (layerMask.anyBitsInCommon(targetMask) && (dirMask!=16)) {
+	    return false;
+	}
+	
 	for (var i=0;i<state.sfx_MovementMasks.length;i++) {
 		var o = state.sfx_MovementMasks[i];
 		var objectMask = o.objectMask;
@@ -943,21 +954,31 @@ function repositionEntitiesOnLayer(positionIndex,layer,dirMask)
 			}
 		}
 	}
-
-    var movingEntities = sourceMask.cloneInto(_o9);
-    sourceMask.iclear(layerMask);
-    movingEntities.iand(layerMask);
-    targetMask.ior(movingEntities);
-
-    level.setCell(positionIndex, sourceMask);
-    level.setCell(targetIndex, targetMask);
-
-    var colIndex=(targetIndex/level.height)|0;
+	
+	var movingEntities = sourceMask.cloneInto(_o9);
+	sourceMask.iclear(layerMask);
+	movingEntities.iand(layerMask);
+	targetMask.ior(movingEntities);
+	
+	level.setCell(positionIndex, sourceMask);
+	level.setCell(targetIndex, targetMask);
+	
+	var colIndex=(targetIndex/level.height)|0;
 	var rowIndex=(targetIndex%level.height);
-    level.colCellContents[colIndex].ior(movingEntities);
-    level.rowCellContents[rowIndex].ior(movingEntities);
-    level.mapCellContents.ior(layerMask);
-    return true;
+	level.colCellContents[colIndex].ior(movingEntities);
+	level.rowCellContents[rowIndex].ior(movingEntities);
+	level.mapCellContents.ior(layerMask);
+	
+	for(var bit = 0; bit < 32*STRIDE_OBJ; bit++) {
+		if(movingEntities.get(bit)) {
+			level.objectFirstRows[bit] = Math.min(rowIndex,level.objectFirstRows[bit]);
+			level.objectFirstCols[bit] = Math.min(colIndex,level.objectFirstCols[bit]);
+			level.objectLastRows[bit] = Math.max(rowIndex,level.objectLastRows[bit]);
+			level.objectLastCols[bit] = Math.max(colIndex,level.objectLastCols[bit]);
+		}
+	}
+	
+	return true;
 }
 
 function repositionEntitiesAtCell(positionIndex) {
@@ -1488,6 +1509,14 @@ replaceCell = function(cell, rule, currentIndex) {
 		level.colCellContents[colIndex].ior(curCellMask);
 		level.rowCellContents[rowIndex].ior(curCellMask);
 		level.mapCellContents.ior(curCellMask);
+		for(var bit = 0; bit < 32*STRIDE_OBJ; bit++) {
+			if(curCellMask.get(bit)) {
+				level.objectFirstRows[bit] = Math.min(rowIndex,level.objectFirstRows[bit]);
+				level.objectFirstCols[bit] = Math.min(colIndex,level.objectFirstCols[bit]);
+				level.objectLastRows[bit] = Math.max(rowIndex,level.objectLastRows[bit]);
+				level.objectLastCols[bit] = Math.max(colIndex,level.objectLastCols[bit]);
+			}
+		}
 	}
 
 	return result;
@@ -2194,6 +2223,13 @@ function calculateRowColMasks() {
 	for (var i=0;i<level.height;i++) {
 		level.rowCellContents[i].setZero();
 	}
+	
+	for(var i=0;i<32*STRIDE_OBJ;i++) {
+		level.objectFirstRows[i] = level.height;
+		level.objectFirstCols[i] = level.width;
+		level.objectLastRows[i] = 0;
+		level.objectLastCols[i] = 0;
+	}
 
 	for (var i=0;i<level.width;i++) {
 		for (var j=0;j<level.height;j++) {
@@ -2202,6 +2238,14 @@ function calculateRowColMasks() {
 			level.mapCellContents.ior(cellContents);
 			level.rowCellContents[j].ior(cellContents);
 			level.colCellContents[i].ior(cellContents);
+			for(var k=0;k<32*STRIDE_OBJ;k++) {
+				if(cellContents.get(k)) {
+					level.objectFirstRows[k] = Math.min(j,level.objectFirstRows[k]);
+					level.objectFirstCols[k] = Math.min(i,level.objectFirstCols[k]);
+					level.objectLastRows[k] = Math.max(j,level.objectLastRows[k]);
+					level.objectLastCols[k] = Math.max(i,level.objectLastCols[k]);
+				}
+			}
 		}
 	}
 }

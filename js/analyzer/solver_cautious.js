@@ -223,20 +223,25 @@ var SolverCautious = (function() {
 		//search a number of iterations, then return true if there is more to come
 		//up to X iterations:
 		sentSolution = false;
+		var lastPrintedIter = -1;
 		for(var iter=continuation; iter<continuation+ITERS_PER_CONTINUATION && iter<ITER_MAX && q.length > 0; iter++) {
-			if(iter % 20000 == 0) {
+			if((iter - lastPrintedIter) >= 20000 || lastPrintedIter == -1) {
 				log("Lev:"+Solver.LEVEL+" Iter:"+iter);
+				lastPrintedIter = iter;
 			}
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
 			var node = q.shift();
 			//because of weirdness with specs and our inability to delete items from the queue, our q might have noise in it.
 			if(node.actions.length == 0) { 
-				continue; 
+				//Don't shift here! The first element in the queue might have changed!
+				exactRemove(node,open);
+				exactInsert(node,closed);
+				clearBackup(node);
+				continue;
 			}
 			if(member(node,closed)) { 
 				warn("found a closed node "+node.id); 
-				//TODO: memory reduction
 				clearBackup(node);
 				continue; 
 			}
@@ -246,21 +251,25 @@ var SolverCautious = (function() {
 				//TODO: should it be put into closed?
 				continue;
 			}
-			//TODO: memory reduction
 			if(node.backup == null) {
 				throw new Error("An open node had its backup removed! Too late to fix it!");
 			}
-			expand(iter,node);
-			if(node.actions.length == 0) {
-				//Don't shift here! The first element in the queue might have changed!
-				exactRemove(node,open);
-				exactInsert(node,closed);
-				//TODO: memory reduction
-				clearBackup(node);
-			} else if(!(sentSolution && FIRST_SOLUTION_ONLY)) {
-				node.f = node.g + node.actionHs[node.actionHs.length-1];
-				q.push(node);
+			while(node.actions.length) {
+				expand(iter,node);
+				iter++;
+				//Special hack -- if we've abandoned the search, don't expand any more.
+				if(FIRST_SOLUTION_ONLY && sentSolution) {
+					break;
+				}
 			}
+			if(FIRST_SOLUTION_ONLY && sentSolution) {
+				break;
+			}
+			iter--;
+			//Don't shift here! The first element in the queue might have changed!
+			exactRemove(node,open);
+			exactInsert(node,closed);
+			clearBackup(node);
 			if(pauseAfterNextSolution && sentSolution) {
 				sentSolution = false;
 				pauseAfterNextSolution = false;
@@ -299,6 +308,8 @@ var SolverCautious = (function() {
 
 	
 	function clearBackup(node) {
+		//never clear the root!
+		if(node == root) { return; }
 		pooledBackupsCount++;
 		pooledBackups[pooledBackupsCount] = node.backup;
 		node.backup = null;
@@ -321,7 +332,6 @@ var SolverCautious = (function() {
 
 	function expand(iter,node) {
 		var action = node.actions.pop();
-		var actionH = node.actionHs.pop();
 		//switch to this state, perform action, createOrFindNode()
 		switchToSearchState(node);
 		if(!processInput(action,false,false,node.backup,true,true) || cmd_cancel || cmd_restart) {
@@ -372,7 +382,7 @@ var SolverCautious = (function() {
 			againLooped = true;
 		}
 		if(againLooped) { return node; }
-		var currentNode = createOrFindNode(node,action,actionH);
+		var currentNode = createOrFindNode(node,action);
 		//log("Found "+currentNode.id+" by "+node.id +":"+action);
 		//if this is winning, report a win
 		if(winning) {
@@ -449,6 +459,7 @@ var SolverCautious = (function() {
 	
 	function calculateMatchedSpecsByPrefix(prefixes, currentNode) {
 		console.log("Calculating matched specs:"+JSON.stringify(prefixes));
+		if(!specs || specs.length == 0) { return []; }
 		var resultByPrefix = prefixes.map(function(prefix) {
 			switchToSearchState(root);
 			var states = [];
@@ -579,7 +590,6 @@ var SolverCautious = (function() {
 	var tempNode = {
 		id:-1,
 		actions:[],
-		actionHs:[],
 		backup:{},
 		predecessors:[],
 		firstPrefix:[],
@@ -594,7 +604,7 @@ var SolverCautious = (function() {
 	
 	var closedCyclePoints = {};
 	
-	function createOrFindNode(pred, action, actionH) {
+	function createOrFindNode(pred, action) {
 		var key0 = hashKey();
 		var key1 = hashKey2();
 		var minusPlayerKey = hashKey(state.playerMask);
@@ -631,7 +641,6 @@ var SolverCautious = (function() {
 				//	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
 				// }
 				//if we are reopening a node, give it a backup again.
-				//TODO: memory reduction
 				if(!existingN.backup) {
 					backupRestores++;
 					if(backupRestores % 1000 == 0) {
@@ -639,27 +648,7 @@ var SolverCautious = (function() {
 					}
 					setBackup(existingN);
 				}
-				if(existingInOpen && existingN.actions.length > 0) {
-					//let's just live with duplicate items!
-					var opposite = OPPOSITE_ACTIONS[action];
-					var oppositeIdx = action in OPPOSITE_ACTIONS ? existingN.actions.indexOf(opposite) : -1;
-					if(oppositeIdx != -1) {
-						existingN.actions.splice(oppositeIdx,1);
-						var ah = existingN.actionHs[oppositeIdx];
-						existingN.actionHs.splice(oppositeIdx,1);
-						if(BACK_STEPS == "all" || (BACK_STEPS == "some" && !(pred && pred.minusPlayerKey == minusPlayerKey))) {
-							existingN.actions.unshift(opposite);
-							existingN.actionHs.unshift(ah * BACK_STEP_PENALTY);
-						}
-					}
-					//TODO: Fix this, it's no longer true!
-					//existingN won't have any successors, since it's in the open set.
-					//so there's no need to worry about updating them.
-				} else {
-					//MAYBE: if existingInClosed, also update successors in the closed set?
-					//Won't help with search at all...
-				}
-				existingN.f = existingN.g + existingN.actionHs[existingN.actions.length-1];
+				existingN.f = existingN.g + existingN.h;
 				q.push(existingN);
 			}
 			return existingN;
@@ -669,7 +658,6 @@ var SolverCautious = (function() {
 		var n = {
 			id:nodeId,
 			actions:ACTIONS.slice(),
-			actionHs:new Array(ACTIONS.length),
 			backup:null,
 			predecessors:pred ? [{action:action, predecessor:pred}] : [],
 			firstPrefix:pred ? pred.firstPrefix.slice() : [],
@@ -683,65 +671,15 @@ var SolverCautious = (function() {
 		};
 		setBackup(n);
 		
-		for(var ai = 0; ai < ACTIONS.length; ai++) {
-			n.actionHs[ai] = h;
-		}
 		var opposite = OPPOSITE_ACTIONS[action];
 		var oppositeIdx = action in OPPOSITE_ACTIONS ? n.actions.indexOf(opposite) : -1;
 		if(oppositeIdx != -1) {
 			n.actions.splice(oppositeIdx,1);
-			var ah = n.actionHs[oppositeIdx];
-			n.actionHs.splice(oppositeIdx,1);
 			if(BACK_STEPS == "all" || (BACK_STEPS == "some" && !(pred && pred.minusPlayerKey == minusPlayerKey))) {
 				n.actions.unshift(opposite);
-				n.actionHs.unshift(ah * BACK_STEP_PENALTY);
 			}
 		}
-		var posnsHash = hashPlayerPositions(playerPositions, playerPositionCount);
-		if(!(minusPlayerKey in seenPlayerPositions)) { seenPlayerPositions[minusPlayerKey] = {}; }
-		if(!(posnsHash in seenPlayerPositions[minusPlayerKey])) { seenPlayerPositions[minusPlayerKey][posnsHash] = 0; }
-		seenPlayerPositions[minusPlayerKey][posnsHash] += 1;
-		for(var ai = 0; ai < ACTIONS.length; ai++) {
-			var a = ACTIONS[ai];
-			if(a < 0 || a >= 4) { continue; }
-			var nidx = n.actions.indexOf(a);
-			if(nidx == -1) { continue; }
-			//let tempPosns[pi] be the probable result of performing a on playerPositions[pi]
-			//TODO: consider stuff on the same layer as the player object at playerPositions[pi]?
-			for(var pi = 0; pi < playerPositionCount; pi++) {
-				var pidx = playerPositions[pi];
-				switch(a) {
-					case UP:
-						tempPosns[pi] = (pidx - 1) < 0 ? pidx : pidx - 1;
-						break;
-					case DOWN:
-						tempPosns[pi] = (pidx + 1) > level.n_tiles ? pidx : pidx + 1;
-						break;
-					case LEFT:
-						tempPosns[pi] = ((pidx - level.height) < 0) ? pidx : (pidx - level.height);
-						break;
-					case RIGHT:
-						tempPosns[pi] = ((pidx + level.height) > level.n_tiles) ? pidx : (pidx + level.height);
-						break;
-				}
-			}
-			var tempHash = hashPlayerPositions(tempPosns, playerPositionCount);
-			if(!(minusPlayerKey in seenPlayerPositions)) {
-				seenPlayerPositions[minusPlayerKey] = {};
-			}
-			//if the hash of ppprime is in seenPlayerPositions, deprioritize it (splice it from and unshift it to n.actions)
-			if(tempHash in seenPlayerPositions[minusPlayerKey]) {
-				n.actions.splice(nidx,1);
-				var ah = n.actionHs[nidx];
-				n.actionHs.splice(nidx,1);
-				n.actions.unshift(a);
-				n.actionHs.unshift(ah * (1 + SEEN_SPOT_PENALTY*seenPlayerPositions[minusPlayerKey][tempHash]));
-				seenPlayerPositions[minusPlayerKey][tempHash]++;
-			} else {
-				seenPlayerPositions[minusPlayerKey][tempHash] = 1;
-			}
-		}
-		n.f = n.g + n.actionHs[n.actions.length-1];
+		n.f = n.g + n.h;
 		nodeId++;
 		if(pred) {
 			n.firstPrefix.push(action);
@@ -919,6 +857,17 @@ var SolverCautious = (function() {
 		// }
 		// return set[node.key0];
 	}
+	
+	function removeInnerSet(node,set) {
+		if((node.key0 in set)) {
+			if(node.key1 in set[node.key0]) {
+				delete set[node.key0][node.key1];
+			}
+			if(Object.getOwnPropertyNames(set[node.key0]).length == 0) {
+				delete set[node.key0];
+			}
+		}
+	}
 
 	function equiv(n1,n2) {
 		if(n1 == n2) { return true; }
@@ -976,6 +925,9 @@ var SolverCautious = (function() {
 		var idx = memberIndexInner(node,innerSet);
 		if(idx != -1) {
 			innerSet.splice(idx,1);
+		}
+		if(innerSet.length == 0) {
+			removeInnerSet(node,set);
 		}
 	}
 

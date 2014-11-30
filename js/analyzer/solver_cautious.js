@@ -528,7 +528,7 @@ var SolverCautious = (function() {
 		return h;
 	}
 	function hashKey2() {
-		var h = 2166136261|0;
+		var h = 0|0;
 		var l = STRIDE_OBJ|0;
 		var tiles = level.n_tiles;
 		var runLength = 0;
@@ -553,6 +553,9 @@ var SolverCautious = (function() {
 			h = hashKey2Int(h, runStart.data[d]);
 		}
 		h = hashKey2Int(h, runLength);
+		h += ( h << 3 )|0;
+		h ^= ( h >> 11 )|0;
+		h += ( h << 15 )|0;
 		return h;		
 	}
 	
@@ -843,11 +846,13 @@ var SolverCautious = (function() {
 		return {};
 	}
 	
-	function getInnerSet(node,set) {
+	function getInnerSet(node,set,autovivify) {
 		if(!(node.key0 in set)) {
+			if(!autovivify) { return null; }
 			set[node.key0] = {};
 		}
 		if(!(node.key1 in set[node.key0])) {
+			if(!autovivify) { return null; }
 			set[node.key0][node.key1] = [];
 		}
 		return set[node.key0][node.key1];
@@ -904,7 +909,8 @@ var SolverCautious = (function() {
 	}
 
 	function member(node, set) {
-		var innerSet = getInnerSet(node,set);
+		var innerSet = getInnerSet(node,set,false);
+		if(!innerSet) { return false; }
 		var idx = memberIndexInner(node,innerSet);
 		if(idx != -1) {
 			return innerSet[idx];
@@ -913,7 +919,7 @@ var SolverCautious = (function() {
 	}
 
 	function insert(node, set) {
-		var innerSet = getInnerSet(node,set);
+		var innerSet = getInnerSet(node,set,true);
 		var idx = memberIndexInner(node,innerSet);
 		if(idx == -1) {
 			innerSet.push(node);
@@ -921,7 +927,8 @@ var SolverCautious = (function() {
 	}
 
 	function remove(node, set) {
-		var innerSet = getInnerSet(node,set);
+		var innerSet = getInnerSet(node,set,false);
+		if(!innerSet) { return; }
 		var idx = memberIndexInner(node,innerSet);
 		if(idx != -1) {
 			innerSet.splice(idx,1);
@@ -932,14 +939,15 @@ var SolverCautious = (function() {
 	}
 
 	function exactInsert(node, set) {
-		var innerSet = getInnerSet(node,set);
+		var innerSet = getInnerSet(node,set,true);
 		if(innerSet.indexOf(node) == -1) {
 			innerSet.push(node);
 		}
 	}
 
 	function exactRemove(node, set) {
-		var innerSet = getInnerSet(node,set);
+		var innerSet = getInnerSet(node,set,false);
+		if(!innerSet) { return; }
 		var idx = innerSet.indexOf(node);
 		if(idx != -1) {
 			innerSet.splice(idx,1);

@@ -1,10 +1,10 @@
 var testLocalGames = [
-	"atlas shrank",
-	"blockfaker",
-	"bouncers",
+	// "atlas shrank",
+	// "blockfaker",
+	// "bouncers", //too hard, skip for now
 	"byyourside",
-	"cakemonsters",
-	"castlemouse",
+	// "cakemonsters", //doesn't compile
+	// "castlemouse",
 	// "chaos wizard",
 // 	"collapse",
 // 	"color chained",
@@ -65,8 +65,8 @@ var testLocalGames = [
 ];
 var testRemoteGames = [
 	// //gallery
-	// "eb0f9102f85b5ea536b1", //singleton traffic
-	// "9440559", //Pants, Shirt, Cap
+	"eb0f9102f85b5ea536b1", //singleton traffic
+	"9440559", //Pants, Shirt, Cap
 	// "ee4c36def9a6847d6308", //Space valet
 	// "f2d0ac09901841f6fdb8", //Instrumenta di Superi
 	// "6877929", //explod
@@ -273,7 +273,7 @@ var testRemoteGames = [
 	// "8b6e3c506bd45c02fa54", //slide rule
 	// "e9fcda2bc6229a6f3913", //Window Hero
 	// "57ed375472fee0c7d42f", //The Explorer
-	// "e7b1e228531d5dc4d71c" //Subterranean Maze of Caves 
+	"e7b1e228531d5dc4d71c" //Subterranean Maze of Caves
 ];
 
 //get stats for every level of every game:
@@ -313,7 +313,7 @@ firstTest = setInterval(function() {
 function tryLoadGist(id,cb) {
 	var githubURL = 'https://api.github.com/gists/'+id;
 
-	consolePrint("Contacting GitHub",true);
+	console.log("Contacting GitHub",true);
 	var githubHTTPClient = new XMLHttpRequest();
 	githubHTTPClient.open('GET', githubURL);
 	githubHTTPClient.onreadystatechange = function() {
@@ -322,7 +322,7 @@ function tryLoadGist(id,cb) {
 		}
 
 		if (githubHTTPClient.responseText==="") {
-			consoleError("GitHub request returned nothing.  A connection fault, maybe?");
+			throw new Error("GitHub request returned nothing.  A connection fault, maybe?");
 		}
 
 		var result = JSON.parse(githubHTTPClient.responseText);
@@ -334,7 +334,7 @@ function tryLoadGist(id,cb) {
 			var code;
 			for(var f in result["files"]) {
 				try {
-					code = result["files"][f];
+					code = result["files"][f].content;
 					unloadGame();
 					compile(["restart"],code);
 					break;

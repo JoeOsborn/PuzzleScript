@@ -136,14 +136,26 @@ function tryLoadGist(id) {
 		} else if (githubHTTPClient.status!==200&&githubHTTPClient.status!==201) {
 			consoleError("HTTP Error "+ githubHTTPClient.status + ' - ' + githubHTTPClient.statusText);
 		} else {
-			var code=result["files"]["script.txt"]["content"];
-			editor.setValue(code);
-			setEditorClean();
-			unloadGame();
-			if(typeof Analyzer != "undefined") {
-				Analyzer.clear();
+			var code;
+			for(var f in result["files"]) {
+				try {
+					code = result["files"][f].content;
+					unloadGame();
+					compile(["restart"],code);
+					break;
+				} catch(e) {
+					code = null;
+				}
 			}
-			compileAndAnalyze(["restart"],code);
+			if(code) {
+				editor.setValue(code);
+				if(typeof Analyzer != "undefined") {
+					Analyzer.clear();
+				}
+				compileAndAnalyze(["restart"],code);
+			} else {
+				throw("No valid code in gist "+id);
+			}
 		}
 	}
 	githubHTTPClient.setRequestHeader("Content-type","application/x-www-form-urlencoded");

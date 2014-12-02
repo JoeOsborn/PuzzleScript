@@ -17,25 +17,9 @@ var SolverCautious = (function() {
 	var RIGHT = 3;
 	var ACTION = 4;
 	
-	var OPPOSITE_ACTIONS = {};
-	OPPOSITE_ACTIONS[UP] = DOWN;
-	OPPOSITE_ACTIONS[DOWN] = UP;
-	OPPOSITE_ACTIONS[LEFT] = RIGHT;
-	OPPOSITE_ACTIONS[RIGHT] = LEFT;
-	
-	var BACK_STEPS="some";
-	//"all": "allow all moves back"
-	//"some": "allow moves back only if the map configuration (ignoring the player) has changed between the predecessor and now."
-	//"none": "allow no moves back"
-
 	var ITERS_PER_CONTINUATION=20000;
 	var ITER_MAX=1000000;
 	
-	var BACK_STEP_PENALTY=10;
-	var SEEN_SPOT_PENALTY=0.00001;
-	
-	var ACTIONS;
-
 	var FIRST_SOLUTION_ONLY = true;
 	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
 	//Longer -> lower value for gDiscount
@@ -54,8 +38,6 @@ var SolverCautious = (function() {
 	var open, closed, q;
 	var root;
 	var MODE = "fast";
-	
-	var seenPlayerPositions = {};
 	
 	var randTable = new Int8Array(256);
 	
@@ -76,7 +58,6 @@ var SolverCautious = (function() {
 		notPlayerMask = state.playerMask.clone();
 		notPlayerMask.iflip();
 		nodeId=0;
-		seenPlayerPositions = {};
 		backupRestores = 0;
 		backupClears = 0;
 		var parsedSpecs = config.spec || [];
@@ -106,9 +87,6 @@ var SolverCautious = (function() {
 			gDiscount = 0.5;
 		}
 		
-		BACK_STEPS = Utilities.getAnnotationValue(Solver.RULES, "BACK_STEPS", BACK_STEPS).toLowerCase();
-		BACK_STEP_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "BACK_STEP_PENALTY", BACK_STEP_PENALTY));
-		SEEN_SPOT_PENALTY = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "SEEN_SPOT_PENALTY", SEEN_SPOT_PENALTY));
 		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", gDiscount));
 		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", hDiscount));
 		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", ITER_MAX));
@@ -125,7 +103,6 @@ var SolverCautious = (function() {
 		if(autotickinterval > 0) {
 			ACTIONS.push(WAIT);
 		}
-		ACTIONS.reverse();
 
 		open = initSet();
 		closed = initSet();
@@ -158,9 +135,7 @@ var SolverCautious = (function() {
 	// 						log("Got a win earlier than expected");
 	// 						break;
 	// 					}
-	// 					node.actions.splice(node.actions.indexOf(spec.prefixes[hi][ai]));
-	// 					node.actions.push(spec.prefixes[hi][ai]);
-	// 					node = expand(0, node);
+	// 					node = expand(0, node, spec.prefixes[hi][ai]);
 	// 				}
 	// 			}
 	// 		}
@@ -233,16 +208,12 @@ var SolverCautious = (function() {
 			//log("Iter "+iter);
 			var node = q.shift();
 			//because of weirdness with specs and our inability to delete items from the queue, our q might have noise in it.
-			if(node.actions.length == 0) { 
-				//Don't shift here! The first element in the queue might have changed!
-				exactRemove(node,open);
-				exactInsert(node,closed);
-				clearBackup(node);
+			if(node.closed) { 
 				continue;
 			}
+			//TODO: remove this check
 			if(member(node,closed)) { 
-				warn("found a closed node "+node.id); 
-				clearBackup(node);
+				error("found a closed node "+node.id); 
 				continue; 
 			}
 			//log("Dat:"+JSON.stringify(node.backup));
@@ -252,10 +223,12 @@ var SolverCautious = (function() {
 				continue;
 			}
 			if(node.backup == null) {
+				//TODO: remake the backup using its best predecessor (recursively). During backup reconstruction, let any non-closed node with f < cutoffF keep its backup around.
 				throw new Error("An open node had its backup removed! Too late to fix it!");
 			}
-			while(node.actions.length) {
-				expand(iter,node);
+			for(var ai = 0; ai < ACTIONS.length; ai++) {
+				var action = ACTIONS[ai];
+				expand(iter,node,action);
 				iter++;
 				//Special hack -- if we've abandoned the search, don't expand any more.
 				if(FIRST_SOLUTION_ONLY && sentSolution) {
@@ -266,10 +239,7 @@ var SolverCautious = (function() {
 				break;
 			}
 			iter--;
-			//Don't shift here! The first element in the queue might have changed!
-			exactRemove(node,open);
-			exactInsert(node,closed);
-			clearBackup(node);
+			closeNode(node);
 			if(pauseAfterNextSolution && sentSolution) {
 				sentSolution = false;
 				pauseAfterNextSolution = false;
@@ -330,8 +300,7 @@ var SolverCautious = (function() {
 		}
 	}
 
-	function expand(iter,node) {
-		var action = node.actions.pop();
+	function expand(iter,node,action) {
 		//switch to this state, perform action, createOrFindNode()
 		switchToSearchState(node);
 		if(!processInput(action,false,false,node.backup,true,true) || cmd_cancel || cmd_restart) {
@@ -592,7 +561,6 @@ var SolverCautious = (function() {
 
 	var tempNode = {
 		id:-1,
-		actions:[],
 		backup:{},
 		predecessors:[],
 		firstPrefix:[],
@@ -600,8 +568,8 @@ var SolverCautious = (function() {
 		eventualSolutions:[],
 		key0:-1|0,
 		key1:-1|0,
-		minusPlayerKey:-1|0,
-		f:0, g:0, h:0
+		f:0, g:0, h:0,
+		closed:false
 	};
 	var tempPosns = [];
 	
@@ -610,7 +578,6 @@ var SolverCautious = (function() {
 	function createOrFindNode(pred, action) {
 		var key0 = hashKey();
 		var key1 = hashKey2();
-		var minusPlayerKey = hashKey(state.playerMask);
 		tempNode.winning = winning;
 		tempNode.key0 = key0;
 		tempNode.key1 = key1;
@@ -619,16 +586,16 @@ var SolverCautious = (function() {
 			openCycles++;
 		}
 		var existingInClosed = existingInOpen ? null : member(tempNode,closed);
-		if(existingInClosed && !existingInOpen) {
-			closedCycles++;
-			if(!(existingInClosed.key0 in closedCyclePoints)) {
-				closedCyclePoints[existingInClosed.key0] = {};
-			}
-			if(!(existingInClosed.key1 in closedCyclePoints[existingInClosed.key0])) {
-				closedCyclePoints[existingInClosed.key0][existingInClosed.key1] = 0;
-			}
-			closedCyclePoints[existingInClosed.key0][existingInClosed.key1]++;
-		}
+		// if(existingInClosed && !existingInOpen) {
+		// 	closedCycles++;
+		// 	if(!(existingInClosed.key0 in closedCyclePoints)) {
+		// 		closedCyclePoints[existingInClosed.key0] = {};
+		// 	}
+		// 	if(!(existingInClosed.key1 in closedCyclePoints[existingInClosed.key0])) {
+		// 		closedCyclePoints[existingInClosed.key0][existingInClosed.key1] = 0;
+		// 	}
+		// 	closedCyclePoints[existingInClosed.key0][existingInClosed.key1]++;
+		// }
 		var existingN = existingInClosed || existingInOpen;
 		var g = pred ? pred.g+gDiscount : 0;
 		if(existingN) {
@@ -652,7 +619,7 @@ var SolverCautious = (function() {
 					setBackup(existingN);
 				}
 				existingN.f = existingN.g + existingN.h;
-				q.push(existingN);
+				reopenNode(existingN);
 			}
 			return existingN;
 		}		
@@ -660,7 +627,6 @@ var SolverCautious = (function() {
 		var h = (hDiscount > 0 ? calculateH()*hDiscount : 0);
 		var n = {
 			id:nodeId,
-			actions:ACTIONS.slice(),
 			backup:null,
 			predecessors:pred ? [{action:action, predecessor:pred}] : [],
 			firstPrefix:pred ? pred.firstPrefix.slice() : [],
@@ -669,19 +635,11 @@ var SolverCautious = (function() {
 			//indexing optimization:
 			key0:key0,
 			key1:key1,
-			minusPlayerKey:minusPlayerKey,
-			f:g+h, g:g, h:h
+			f:g+h, g:g, h:h,
+			closed:false
 		};
 		setBackup(n);
 		
-		var opposite = OPPOSITE_ACTIONS[action];
-		var oppositeIdx = action in OPPOSITE_ACTIONS ? n.actions.indexOf(opposite) : -1;
-		if(oppositeIdx != -1) {
-			n.actions.splice(oppositeIdx,1);
-			if(BACK_STEPS == "all" || (BACK_STEPS == "some" && !(pred && pred.minusPlayerKey == minusPlayerKey))) {
-				n.actions.unshift(opposite);
-			}
-		}
 		n.f = n.g + n.h;
 		nodeId++;
 		if(pred) {
@@ -692,9 +650,24 @@ var SolverCautious = (function() {
 
 	function enqueueNode(n) {
 		exactInsert(n,open);
+		n.closed = false;
 		q.push(n);
 	}
+	
+	function closeNode(node) {
+		exactRemove(node,open);
+		exactInsert(node,closed);
+		node.closed = true;
+		clearBackup(node);
+	}
 
+	function reopenNode(node) {
+		exactRemove(node,closed);
+		exactInsert(node,open);
+		node.closed = false;
+		q.push(node);
+	}
+	
 	var _oA;
 	var _oB;
 

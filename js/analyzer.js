@@ -2,8 +2,8 @@
 
 function compileAndAnalyze(cmd, lev, seed) {
 	compile(cmd, lev, seed);
-	if(window && window.Analyzer) {
-		window.Analyzer.analyze(cmd,lev,seed);
+	if(typeof Analyzer != "undefined") {
+		Analyzer.analyze(cmd,lev,seed);
 	}
 }
 

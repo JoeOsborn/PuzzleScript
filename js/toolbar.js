@@ -1,8 +1,8 @@
 function memTestClick() {
 	clearConsole();
-	if(window.Analyzer) { window.Analyzer.mode = window.Analyzer.MODE_MEM_TEST; }
+	if(typeof Analyzer != "undefined") { Analyzer.mode = Analyzer.MODE_MEM_TEST; }
 	compileAndAnalyze(["restart"]);
-	if(window.Analyzer) { window.Analyzer.mode = window.Analyzer.MODE_NORMAL; }
+	if(typeof Analyzer != "undefined") { Analyzer.mode = Analyzer.MODE_NORMAL; }
 }
 
 function runClick() {

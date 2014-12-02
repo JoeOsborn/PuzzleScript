@@ -149,27 +149,41 @@ var titleSelection=0;
 var titleSelected=false;
 
 // Fallbacks. We might be running in an environment without audio, graphics, or other good stuff.
-var playSound, canvasResize, redraw, forceRegenImages, consolePrint, consoleError, consoleCacheDump;
-if(!playSound) {
-	playSound = function(_) { };
+var safePlaySound, safeCanvasResize, safeRedraw, safeForceRegenImages, safeConsolePrint, safeConsoleError, safeConsoleCacheDump;
+if(typeof playSound != "undefined") {
+	safePlaySound = playSound;
+} else {
+	safePlaySound = function(_) { };
 }
-if(!canvasResize) {
-	canvasResize = function() { };
+if(typeof canvasResize != "undefined") {
+	safeCanvasResize = canvasResize;
+} else {
+	safeCanvasResize = function(_) { };
 }
-if(!redraw) {
-	redraw = function() { };
+if(typeof redraw != "undefined") {
+	safeRedraw = redraw;
+} else {
+	safeRedraw = function() { };
 }
-if(!forceRegenImages) {
-	forceRegenImages = function() { };
+if(typeof forceRegenImages != "undefined") {
+	safeForceRegenImages = forceRegenImages;
+} else {
+	safeForceRegenImages = function() { };
 }
-if(!consolePrint) {
-	consolePrint = function(_) { }
+if(typeof consolePrint != "undefined") {
+	safeConsolePrint = consolePrint;
+} else {
+	safeConsolePrint = function(_) { };
 }
-if(!consoleError) {
-	consoleError = function(_) { }
+if(typeof consoleError != "undefined") {
+	safeConsoleError = consoleError;
+} else {
+	safeConsoleError = function(_) { };
 }
-if(!consoleCacheDump) {
-	consoleCacheDump = function() { }
+if(typeof consoleCacheDump != "undefined") {
+	safeConsoleCacheDump = consoleCacheDump;
+} else {
+	safeConsoleCacheDump = function() { };
 }
 // End fallbacks
 
@@ -178,8 +192,8 @@ function unloadGame() {
 	level = new Level(0, 5, 5, 2, null);
 	level.objects = new Int32Array(0);
 	generateTitleScreen();
-	canvasResize();
-	redraw();
+	safeCanvasResize();
+	safeRedraw();
 }
 
 function generateTitleScreen()
@@ -370,7 +384,7 @@ function drawMessageScreen() {
 	if (quittingMessageScreen) {
 		titleImage[10]=titleImage[9];
 	}		
-	canvasResize();
+	safeCanvasResize();
 }
 
 var loadedLevelSeed=0;
@@ -381,14 +395,14 @@ function loadLevelFromLevelDat(state,leveldat,randomseed) {
 	}
 	loadedLevelSeed = randomseed;
 	RandomGen = new RNG(loadedLevelSeed);
-	forceRegenImages();
+	safeForceRegenImages();
 	titleScreen=false;
 	titleMode=curlevel>0?1:0;
 	titleSelection=curlevel>0?1:0;
 	titleSelected=false;
     againing=false;
     if (leveldat===undefined) {
-    	consolePrint("Trying to access a level that doesn't exist.",true);
+    	safeConsolePrint("Trying to access a level that doesn't exist.",true);
     	return;
     }
     if (leveldat.message===undefined) {
@@ -407,7 +421,7 @@ function loadLevelFromLevelDat(state,leveldat,randomseed) {
 		tryPlayShowMessageSound();
 		drawMessageScreen();
 	}
-   	canvasResize();
+	safeCanvasResize();
 
 	clearInputHistory();
 }
@@ -450,12 +464,12 @@ var sprites = [
 
 
 generateTitleScreen();
-canvasResize();
+safeCanvasResize();
 
 function tryPlaySimpleSound(soundname) {
 	if (state.sfx_Events[soundname]!==undefined) {
 		var seed = state.sfx_Events[soundname];
-		playSound(seed);
+		safePlaySound(seed);
 	}
 }
 function tryPlayTitleSound() {
@@ -541,7 +555,7 @@ function setGameState(_state, command, randomseed) {
 	RandomGen = new RNG(randomseed);
 
 	state = _state;
-    consolePrint('setting game state :D ');
+    safeConsolePrint('setting game state :D ');
     backups=[];
     //set sprites
     sprites = [];
@@ -649,7 +663,7 @@ function setGameState(_state, command, randomseed) {
 	if(command[0] !== "rebuild") {
 		clearInputHistory();
 	}
-	canvasResize();
+	safeCanvasResize();
 
 
 
@@ -822,7 +836,7 @@ function DoRestart(force) {
 	}
 
 	if (verbose_logging) {
-		consolePrint("--- restarting ---",true);
+		safeConsolePrint("--- restarting ---",true);
 	}
 
 	restoreLevel(restartTarget);
@@ -840,7 +854,7 @@ function DoUndo(force) {
 		return;
 	}
 	if (verbose_logging) {
-		consolePrint("--- undoing ---",true);
+		safeConsolePrint("--- undoing ---",true);
 	}
 	if (backups.length>0) {
 		var tobackup = backups.pop();
@@ -1758,7 +1772,7 @@ function matchCellRow(direction, cellRowMatch, cellRow, cellRowMask, result) {
 		}
     	default:
     	{
-    		consolePrint("EEEP "+direction);
+    		safeConsolePrint("EEEP "+direction);
     	}
     }
 
@@ -1830,7 +1844,7 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask,resul
 		}
     	default:
     	{
-    		consolePrint("EEEP2 "+direction);
+    		safeConsolePrint("EEEP2 "+direction);
     	}
     }
 
@@ -1852,7 +1866,7 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask,resul
 				} else if (direction === 8) { //right
 					kmax=level.width-(x+len)+1;	
 				} else {
-					consolePrint("EEEP2 "+direction);					
+					safeConsolePrint("EEEP2 "+direction);					
 				}
 
 				result.push.apply(result, cellRowMatch(cellRow,i,kmax,0));
@@ -1873,7 +1887,7 @@ function matchCellRowWildCard(direction, cellRowMatch, cellRow,cellRowMask,resul
 				} else if (direction === 1) { // up
 					kmax=y-len+2;					
 				} else {
-					consolePrint("EEEP2 "+direction);
+					safeConsolePrint("EEEP2 "+direction);
 				}
 				result.push.apply(result, cellRowMatch(cellRow,i,kmax,0));
 			}
@@ -1993,7 +2007,7 @@ Rule.prototype.applyAt = function(delta,tuple,check) {
 	if (verbose_logging && result){
 		var logString = '<font color="green">Rule <a onclick="jumpToLine(' + rule.lineNumber + ');"  href="javascript:void(0);">' + rule.lineNumber + '</a> ' + 
 			ruleDirection + ' applied.</font>';
-		consolePrint(logString);
+		safeConsolePrint(logString);
 	}
 	if(result && applyAtWatchers && applyAtWatchers.length) {
 		var ruleLoc = rule.getGroupAndRuleIndex();
@@ -2042,7 +2056,7 @@ function showTempMessage() {
 	messageselected=false;
 	tryPlayShowMessageSound();
 	drawMessageScreen();
-	canvasResize();
+	safeCanvasResize();
 }
 
 var _randomMatches = [];
@@ -2086,7 +2100,7 @@ function applyRandomRuleGroup(ruleGroup) {
 		}
 		if(verbose_logging) {
 			var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
-			consolePrint(logMessage);
+			safeConsolePrint(logMessage);
 		}
 	}
 
@@ -2415,10 +2429,10 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	
 	if (verbose_logging) { 
 		if (inputDir===-1) {
-			consolePrint('Turn starts with no input.')
+			safeConsolePrint('Turn starts with no input.')
 		} else {
-			consolePrint('=======================');
-			consolePrint('Turn starts with input of ' + ['up','left','down','right','action'][inputDir]+'.');
+			safeConsolePrint('=======================');
+			safeConsolePrint('Turn starts with input of ' + ['up','left','down','right','action'][inputDir]+'.');
 		}
 	}
 
@@ -2447,8 +2461,8 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 		}
 		if (somemoved===false) {
 			if (verbose_logging){
-				consolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
-				consoleCacheDump();
+				safeConsolePrint('require_player_movement set, but no player movement detected, so cancelling turn.');
+				safeConsoleCacheDump();
 			}
 			if(!dontCancelOrRestart) {
 				backups.push(bak);
@@ -2463,8 +2477,8 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	//cancel or restart
 	if (cmd_cancel) {
 		if (verbose_logging) { 
-			consolePrint('CANCEL command executed, cancelling turn.');
-			consoleCacheDump();
+			safeConsolePrint('CANCEL command executed, cancelling turn.');
+			safeConsoleCacheDump();
 		}
 		if(!dontCancelOrRestart) {
 			backups.push(bak);
@@ -2476,8 +2490,8 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 
 	if (cmd_restart) {
 		if (verbose_logging) { 
-			consolePrint('RESTART command executed, reverting to restart state.');
-			consoleCacheDump();
+			safeConsolePrint('RESTART command executed, reverting to restart state.');
+			safeConsoleCacheDump();
 		}
 		if(!dontCancelOrRestart) {
 			backups.push(bak);
@@ -2499,7 +2513,7 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 		if (level.objects[i]!==bak.dat[i]) {
 			if (dontModify) {
 				if (verbose_logging) {
-					consoleCacheDump();
+					safeConsoleCacheDump();
 				}
 				backups.push(bak);
 				DoUndo(true);
@@ -2517,14 +2531,14 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 
 	if (dontModify) {		
 		if (verbose_logging) {
-			consoleCacheDump();
+			safeConsoleCacheDump();
 		}
 		return false;
 	}
 	
 	if (textMode===false && (dontCheckWin===undefined ||dontCheckWin===false)) {
 		if (verbose_logging) { 
-			consolePrint('Checking win condition.');
+			safeConsolePrint('Checking win condition.');
 		}
 		checkWin();
 	}
@@ -2532,7 +2546,7 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	var anyChanges = handleCommands(dir, modified, shortcutAgain, dontCancelOrRestart);
 
 	if (verbose_logging) {
-		consoleCacheDump();
+		safeConsoleCacheDump();
 	}
 
 	if (winning) {
@@ -2567,7 +2581,7 @@ function runAllRules(dir,bak) {
 		rigidloop=false;
 		i++;
 	
-		if (verbose_logging){consolePrint('applying rules');}
+		if (verbose_logging){safeConsolePrint('applying rules');}
 
 		applyRules(state.rules, state.loopPoint, startRuleGroupIndex, level.bannedGroup);
 		
@@ -2583,34 +2597,34 @@ function runAllRules(dir,bak) {
 	} while (i < 50 && rigidloop);
 		
 	if (i>=50) {
-		consolePrint("looped through 50 times, gave up.	 too many loops!");
+		safeConsolePrint("looped through 50 times, gave up.	 too many loops!");
 	}
 	
-	if (verbose_logging){consolePrint('applying late rules');}
+	if (verbose_logging){safeConsolePrint('applying late rules');}
 	applyRules(state.lateRules, state.lateLoopPoint, 0);
 	startRuleGroupIndex=0;		
 }
 
 function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 	for (var i=0;i<seedsToPlay_CantMove.length;i++) {
-		playSound(seedsToPlay_CantMove[i]);
+		safePlaySound(seedsToPlay_CantMove[i]);
 	}
 
 	for (var i=0;i<seedsToPlay_CanMove.length;i++) {
-		playSound(seedsToPlay_CanMove[i]);
+		safePlaySound(seedsToPlay_CanMove[i]);
 	}
 
 	for (var i=0;i<state.sfx_CreationMasks.length;i++) {
 		var entry = state.sfx_CreationMasks[i];
 		if (sfxCreateMask.anyBitsInCommon(entry.objectMask)) {
-			playSound(entry.seed);
+			safePlaySound(entry.seed);
 		}
 	}
 
 	for (var i=0;i<state.sfx_DestructionMasks.length;i++) {
 		var entry = state.sfx_DestructionMasks[i];
 		if (sfxDestroyMask.anyBitsInCommon(entry.objectMask)) {
-			playSound(entry.seed);
+			safePlaySound(entry.seed);
 		}
 	}
 
@@ -2624,7 +2638,7 @@ function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 	if (!winning) {
 		if (cmd_checkpoint && !skipCheckpoint) {
 			if (verbose_logging) { 
-				consolePrint('CHECKPOINT command executed, saving current state to the restart state.');
+				safeConsolePrint('CHECKPOINT command executed, saving current state to the restart state.');
 			}
 			restartTarget=backupLevel();
 		}	 
@@ -2634,12 +2648,12 @@ function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 			if(shortcutAgain) {
 				if(dir == -1 && !modified) {
 					if (verbose_logging) {
-						consolePrint('AGAIN command executed, but no changes occurred. Will not execute any more turns.');
+						safeConsolePrint('AGAIN command executed, but no changes occurred. Will not execute any more turns.');
 					}
 					againing = false;
 				} else {
 					if (verbose_logging) { 
-						consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
+						safeConsolePrint('AGAIN command executed, with changes detected - will execute another turn.');
 					}
 					againing = true;
 					timer = 0;
@@ -2652,7 +2666,7 @@ function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 					verbose_logging=old_verbose_logging;
       	
 					if (verbose_logging) { 
-						consolePrint('AGAIN command executed, with changes detected - will execute another turn.');
+						safeConsolePrint('AGAIN command executed, with changes detected - will execute another turn.');
 					}
       	
 					againing=true;
@@ -2660,7 +2674,7 @@ function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 				} else {					
 					verbose_logging=old_verbose_logging;
 					if (verbose_logging) { 
-						consolePrint('AGAIN command not executed, it wouldn\'t make any changes.');
+						safeConsolePrint('AGAIN command not executed, it wouldn\'t make any changes.');
 					}
 				}
 				verbose_logging=old_verbose_logging;
@@ -2679,7 +2693,7 @@ function checkWin() {
 	}
 
 	if (cmd_win) {
-		consolePrint("Win Condition Satisfied");
+		safeConsolePrint("Win Condition Satisfied");
 		DoWin();
 		return;
 	}
@@ -2743,7 +2757,7 @@ function checkWin() {
 	}
 
 	if (won) {
-		consolePrint("Win Condition Satisfied");
+		safeConsolePrint("Win Condition Satisfied");
 		DoWin();
 	}
 }
@@ -2809,7 +2823,7 @@ function nextLevel() {
 
 	}
 
-	canvasResize();	
+	safeCanvasResize();	
 	clearInputHistory();
 }
 

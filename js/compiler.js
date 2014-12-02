@@ -2,6 +2,30 @@
 
 var global = this;
 
+// Fallbacks. We might be running in an environment without audio, graphics, or other good stuff.
+var safeForceRegenImages, safeConsolePrint, safeConsoleError, safeConsoleCacheDump;
+if(typeof forceRegenImages != "undefined") {
+	safeForceRegenImages = forceRegenImages;
+} else {
+	safeForceRegenImages = function() { };
+}
+if(typeof consolePrint != "undefined") {
+	safeConsolePrint = consolePrint;
+} else {
+	safeConsolePrint = function(_) { };
+}
+if(typeof consoleError != "undefined") {
+	safeConsoleError = consoleError;
+} else {
+	safeConsoleError = function(_) { };
+}
+if(typeof consoleCacheDump != "undefined") {
+	safeConsoleCacheDump = consoleCacheDump;
+} else {
+	safeConsoleCacheDump = function() { };
+}
+// End fallbacks
+
 function isColor(str) {
 	str = str.trim();
 	if (str in colorPalettes.arnecolors)
@@ -2078,11 +2102,11 @@ function printRules(state) {
 		output += "ENDLOOP<br>";
 	}
 	output+="===========<br>";
-	consolePrint(output);
+	safeConsolePrint(output);
 }
 
 function removeDuplicateRules(state) {
-	consolePrint("rule count before = " +state.rules.length);
+	safeConsolePrint("rule count before = " +state.rules.length);
 	var record = {};
 	var newrules=[];
 	var lastgroupnumber=-1;
@@ -2100,7 +2124,7 @@ function removeDuplicateRules(state) {
 		}
 		lastgroupnumber=groupnumber;
 	}
-	consolePrint("rule count after = " +state.rules.length);
+	safeConsolePrint("rule count after = " +state.rules.length);
 }
 function generateLoopPoints(state) {
 	var loopPoint={};
@@ -2491,7 +2515,7 @@ StringStream.prototype = {
   
 var MAX_ERRORS=5;
 function loadFile(str) {
-	consolePrint('loadFile');
+	safeConsolePrint('loadFile');
 
 	var processor = new codeMirrorFn();
 	var state = processor.startState();
@@ -2505,7 +2529,7 @@ function loadFile(str) {
 			processor.token(ss, state);
 
 			if (errorCount>MAX_ERRORS) {
-				consolePrint("too many errors, aborting compilation");
+				safeConsolePrint("too many errors, aborting compilation");
 				return;
 			}
 		}		
@@ -2577,9 +2601,9 @@ function loadFile(str) {
 // 	delete state.loops;
 	/*
 	var lines = stripComments(str);
-	consolePrint(lines);
+	safeConsolePrint(lines);
 	var sections = generateSections(lines);
-	consolePrint(sections);
+	safeConsolePrint(sections);
 	var sss = generateSemiStructuredSections(sections);*/
 	return state;
 }
@@ -2587,7 +2611,7 @@ function loadFile(str) {
 var ifrm;
 function compile(command,text,randomseed) {
 	matchCache={};
-	if(forceRegenImages) { forceRegenImages(); };
+	safeForceRegenImages();
 	if (command===undefined) {
 		command = ["restart"];
 	}
@@ -2610,11 +2634,11 @@ function compile(command,text,randomseed) {
 	errorCount = 0;
 	compiling = true;
 	errorStrings = [];
-	consolePrint('=================================');
+	safeConsolePrint('=================================');
 	try
 	{
 		var state = loadFile(text);
-//		consolePrint(JSON.stringify(state));
+//		safeConsolePrint(JSON.stringify(state));
 	} finally {
 		compiling = false;
 	}
@@ -2629,7 +2653,7 @@ function compile(command,text,randomseed) {
 	}*/
 
 	if (errorCount>0) {
-		consoleError('<span class="systemMessage">Errors detected during compilation, the game may not work correctly.</span>');
+		safeConsoleError('<span class="systemMessage">Errors detected during compilation, the game may not work correctly.</span>');
 	}
 	else {
 		var ruleCount=0;
@@ -2640,9 +2664,9 @@ function compile(command,text,randomseed) {
 			ruleCount+=state.lateRules[i].length;
 		}
 		if (command[0]=="restart") {
-			consolePrint('<span class="systemMessage">Successful Compilation, generated ' + ruleCount + ' instructions.</span>');
+			safeConsolePrint('<span class="systemMessage">Successful Compilation, generated ' + ruleCount + ' instructions.</span>');
 		} else {
-			consolePrint('<span class="systemMessage">Successful live recompilation, generated ' + ruleCount + ' instructions.</span>');
+			safeConsolePrint('<span class="systemMessage">Successful live recompilation, generated ' + ruleCount + ' instructions.</span>');
 
 		}
 	}
@@ -2650,7 +2674,7 @@ function compile(command,text,randomseed) {
 
 	clearInputHistory();
 
-	consoleCacheDump();	
+	safeConsoleCacheDump();	
 }
 
 var global = this;
@@ -3116,7 +3140,7 @@ function compileRules(state,rules,prefix) {
 					concat(verbose_logging ?
 						[
 							(rule.hasReplacements ? "if(result) {":""),
-							"consolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[rule.direction] + " applied.</font>');",
+							"safeConsolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[rule.direction] + " applied.</font>');",
 					   	(rule.hasReplacements ? "}":"")
 						] :
 						[]
@@ -3138,7 +3162,7 @@ function compileRules(state,rules,prefix) {
 					if(cmd[0] == "message") { queueCommands.push("messagetext = \""+cmd[1].replace(/\"/g,"\\\"")+"\";"); }
 					if(verbose_logging) {
 						var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
-						queueCommands.push("consolePrint('"+logMessage+"');");
+						queueCommands.push("safeConsolePrint('"+logMessage+"');");
 					}
 				}
 				queueCommands.push("}");

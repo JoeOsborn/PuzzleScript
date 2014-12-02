@@ -20,6 +20,20 @@ for post-launch credits, check out activty on github.com/increpare/PuzzleScript
 
 */
 
+// Fallbacks. We might be running in an environment without audio, graphics, or other good stuff.
+var safeConsolePrint, safeConsoleError;
+if(typeof consolePrint != "undefined") {
+	safeConsolePrint = consolePrint;
+} else {
+	safeConsolePrint = function(_) { };
+}
+if(typeof consoleError != "undefined") {
+	safeConsoleError = consoleError;
+} else {
+	safeConsoleError = function(_) { };
+}
+// End fallbacks
+
 var window;
 var compiling = false;
 var errorStrings = [];
@@ -34,7 +48,7 @@ function logErrorCacheable(str, lineNumber,urgent) {
          if (errorStrings.indexOf(errorString) >= 0 && !urgent) {
             //do nothing, duplicate error
          } else {
-            consolePrint(errorString);
+            safeConsolePrint(errorString);
             errorStrings.push(errorString);
             errorCount++;
         }
@@ -50,7 +64,7 @@ function logError(str, lineNumber,urgent) {
          if (errorStrings.indexOf(errorString) >= 0 && !urgent) {
             //do nothing, duplicate error
          } else {
-            consolePrint(errorString,true);
+            safeConsolePrint(errorString,true);
             errorStrings.push(errorString);
             errorCount++;
         }
@@ -66,7 +80,7 @@ function logWarning(str, lineNumber,urgent) {
          if (errorStrings.indexOf(errorString) >= 0 && !urgent) {
             //do nothing, duplicate error
          } else {
-            consolePrint(errorString,true);
+            safeConsolePrint(errorString,true);
             errorStrings.push(errorString);
         }
     }
@@ -77,7 +91,7 @@ function logErrorNoLine(str,urgent) {
          if (errorStrings.indexOf(errorString) >= 0 && !urgent) {
             //do nothing, duplicate error
          } else {
-            consolePrint(errorString,true);
+            safeConsolePrint(errorString,true);
             errorStrings.push(errorString);
         }
         errorCount++;
@@ -92,7 +106,7 @@ function logBetaMessage(str,urgent){
          if (errorStrings.indexOf(errorString) >= 0 && !urgent) {
             //do nothing, duplicate error
          } else {
-            consoleError(errorString);
+            safeConsoleError(errorString);
             errorStrings.push(errorString);
         }
     }  

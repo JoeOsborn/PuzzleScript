@@ -395,8 +395,8 @@ function onKeyDown(event) {
         } else if (event.keyCode===75 && (event.ctrlKey||event.metaKey)) {//ctrl+k
             makeGIF();
             prevent(event);
-        } else if(event.keyCode == 72 && (event.ctrlKey||event.metaKey) && Analyzer) {//ctrl-h
-            Analyzer.dumpHint();
+        } else if(event.keyCode == 72 && (event.ctrlKey||event.metaKey) && typeof Analyzer != "undefined") {//ctrl-h
+            Analyzer.dumpSpec();
             prevent(event);
         }
     }

@@ -33,9 +33,9 @@ var editor = window.CodeMirror.fromTextArea(code, {
 	lineWrapping: true,
 	lineNumbers: true,
 	styleActiveLine: true,
-	gutters: window.Analyzer ? ["CodeMirror-linenumbers", window.Analyzer.analyzerRuleCountGutter] : ["CodeMirror-linenumbers"]
+	gutters: (typeof Analyzer != "undefined") ? ["CodeMirror-linenumbers", Analyzer.analyzerRuleCountGutter] : ["CodeMirror-linenumbers"]
 });
-if(window.Analyzer) {
+if(typeof Analyzer != "undefined") {
 	editor.on("gutterClick", Analyzer.onEditorGutterClick);
 }
 
@@ -140,7 +140,7 @@ function tryLoadGist(id) {
 			editor.setValue(code);
 			setEditorClean();
 			unloadGame();
-			if(Analyzer) {
+			if(typeof Analyzer != "undefined") {
 				Analyzer.clear();
 			}
 			compileAndAnalyze(["restart"],code);
@@ -162,7 +162,7 @@ function tryLoadFile(fileName) {
 		editor.setValue(fileOpenClient.responseText);
 		setEditorClean();
 		unloadGame();
-		if(Analyzer) {
+		if(typeof Analyzer != "undefined") {
 			Analyzer.clear();
 		}
 		compileAndAnalyze(["restart"]);

@@ -5,62 +5,62 @@ var testLocalGames = [
 	"byyourside",
 	"cakemonsters",
 	"castlemouse",
-	"chaos wizard",
-	"collapse",
-	"color chained",
-	"constellationz",
-	"cratopia",
-	"cute train",
-	"diesinthelight",
-	"dropswap",
-	"dungeonjanitor",
-	"ebony and ivory",
-	"equestrianarmageddon",
-	"gobble_rush",
-	"heroes_of_sokoban",
-	"heroes_of_sokoban_2",
-	"heroes_of_sokoban_3",
-	"icecrates",
-	"kettle",
-	"ledchallenge",
-	"legend of zokoban",
-	"limerick",
-	"lovendpieces",
-	"lunar_lockout",
-	"m c eschers armageddon",
-	"manic_ammo",
-	"mazezam",
-	"microban",
-	"midas",
-	"modality",
-	"naughtysprite",
-	"nekopuzzle",
-	"notsnake",
-	"octat",
-	"ponies jumping synchronously",
-	"push",
-	"puzzles",
-	"riverpuzzle",
-	"robotarm",
-	"scriptcross",
-	"slidings",
-	"smother",
-	"sok7",
-	"sokoban_basic",
-	"sokoban_horizontal",
-	"sokoban_match3",
-	"sokoban_sticky",
-	"sokobond demake",
-	"stick_candy_puzzle_saga",
-	"sumo",
-	"take heart lass",
-	"the_saga_of_the_candy_scroll",
-	"threes",
-	"tiny treasure hunt",
-	"tunnel rat",
-	"whaleworld",
-	"wordgame",
-	"wrappingrecipe",
+	// "chaos wizard",
+// 	"collapse",
+// 	"color chained",
+// 	"constellationz",
+// 	"cratopia",
+// 	"cute train",
+// 	"diesinthelight",
+// 	"dropswap",
+// 	"dungeonjanitor",
+// 	"ebony and ivory",
+// 	"equestrianarmageddon",
+// 	"gobble_rush",
+// 	"heroes_of_sokoban",
+// 	"heroes_of_sokoban_2",
+// 	"heroes_of_sokoban_3",
+// 	"icecrates",
+// 	"kettle",
+// 	"ledchallenge",
+// 	"legend of zokoban",
+// 	"limerick",
+// 	"lovendpieces",
+// 	"lunar_lockout",
+// 	"m c eschers armageddon",
+// 	"manic_ammo",
+// 	"mazezam",
+// 	"microban",
+// 	"midas",
+// 	"modality",
+// 	"naughtysprite",
+// 	"nekopuzzle",
+// 	"notsnake",
+// 	"octat",
+// 	"ponies jumping synchronously",
+// 	"push",
+// 	"puzzles",
+// 	"riverpuzzle",
+// 	"robotarm",
+// 	"scriptcross",
+// 	"slidings",
+// 	"smother",
+// 	"sok7",
+// 	"sokoban_basic",
+// 	"sokoban_horizontal",
+// 	"sokoban_match3",
+// 	"sokoban_sticky",
+// 	"sokobond demake",
+// 	"stick_candy_puzzle_saga",
+// 	"sumo",
+// 	"take heart lass",
+// 	"the_saga_of_the_candy_scroll",
+// 	"threes",
+// 	"tiny treasure hunt",
+// 	"tunnel rat",
+// 	"whaleworld",
+// 	"wordgame",
+// 	"wrappingrecipe",
 	"zenpuzzlegarden"
 ];
 var testRemoteGames = [
@@ -189,7 +189,8 @@ var testRemoteGames = [
 	// "e7f21a1667880eb8aff0", //gifts of the forest
 	// "1a3056782a7e6c0eb1db", //gamlet
 	// "91812deb73f9fa066c9c", //pitman
-	// "dad8138eaa7b7e3c2bc9", //princess of isometria
+	// "dad8138eaa7b7e3c2bc9", //princess of isometria 1
+	// "99515544cb9870dd49dc", //princess of isometria 2
 	// "eb1666d62c9116c45013", //dot puzzle
 	// "050ead59a13f35c6f4e0", //faced
 	// "8604829", //cops and robbers
@@ -268,15 +269,16 @@ var testRemoteGames = [
 	// "7381081", //elevator simulator
 	// "2db388ed325ecca43cd2", //stand
 	// "44db0cd60ac600746bad", //party demon
-	// "b48b73a89b8c99fff7f2" //stand 2
+	// "b48b73a89b8c99fff7f2", //stand 2
+	// "8b6e3c506bd45c02fa54", //slide rule
+	// "e9fcda2bc6229a6f3913", //Window Hero
+	// "57ed375472fee0c7d42f", //The Explorer
+	// "e7b1e228531d5dc4d71c" //Subterranean Maze of Caves 
 ];
 
 //get stats for every level of every game:
 //how long it took to get first answer (in iters and in seconds), how many answers in M iters & N seconds
 
-SolverCautious.BACK_STEPS = "some";
-SolverCautious.BACK_STEP_PENALTY = "10";
-SolverCautious.SEEN_SPOT_PENALTY = "0.00001";
 SolverCautious.gDiscount = "1.0";
 SolverCautious.hDiscount = "5.0";
 SolverCautious.ITER_MAX = "1000000";

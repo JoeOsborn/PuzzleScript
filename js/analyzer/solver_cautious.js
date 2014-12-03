@@ -52,6 +52,8 @@ var SolverCautious = (function() {
 	var pooledBackupsCount = -1;
 	var backupRestores = 0, backupClears = 0;
 	
+	var q;
+	
 	module.startSearch = function(config) {
 		if(!_oA) { _oA = new BitVec(STRIDE_OBJ); }
 		if(!_oB) { _oB = new BitVec(STRIDE_OBJ); }
@@ -107,7 +109,9 @@ var SolverCautious = (function() {
 		open = initSet();
 		closed = initSet();
 		//Sort by F, break ties by H.
-		q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); });
+		//q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[],32767);
+		//qq = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[]);
+		q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[]);
 		
 		var initHDiscount = hDiscount;
 		var initGDiscount = gDiscount;
@@ -193,6 +197,23 @@ var SolverCautious = (function() {
 		}
 		return ret;
 	}
+	
+	function popQueue() {
+		var node = q.shift();
+		// if(q.length < q.fixedLength && qq.length > 0) {
+		// 	var replace = qq.shift();
+		// 	q.push(replace);
+		// }
+		return node;
+	}
+	
+	function pushQueue(n) {
+		var overflow = q.push(n);
+		// if(overflow) {
+		// 	clearBackup(overflow);
+		// 	qq.push(overflow);
+		// }
+	}
 
 	module.searchSome = function(continuation) {
 		//search a number of iterations, then return true if there is more to come
@@ -206,7 +227,7 @@ var SolverCautious = (function() {
 			}
 			//dequeue and move from open to closed
 			//log("Iter "+iter);
-			var node = q.shift();
+			var node = popQueue();
 			//because of weirdness with specs and our inability to delete items from the queue, our q might have noise in it.
 			if(node.closed) { 
 				continue;
@@ -360,6 +381,7 @@ var SolverCautious = (function() {
 			
 			if(FIRST_SOLUTION_ONLY) {
 				q = new priority_queue.PriorityQueue();
+				// qq = new priority_queue.PriorityQueue();
 				open = initSet();
 				closed = initSet();
 				return currentNode;

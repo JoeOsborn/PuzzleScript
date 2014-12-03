@@ -4,11 +4,15 @@ var scope = self;
 var exports = (typeof module !== 'undefined' && module.exports) ?
     module.exports : scope.priority_queue = {};
 
-exports.PriorityQueue = function PriorityQueue(compare, queue) {
-  if (!(this instanceof PriorityQueue)) return new PriorityQueue(compare, queue);
+exports.PriorityQueue = function PriorityQueue(compare, queue, fixedLength) {
+  if (!(this instanceof PriorityQueue)) return new PriorityQueue(compare, queue, fixedLength);
 
-  compare = compare || min_first;
-  queue   = queue   || [];
+  compare     = compare || min_first;
+  queue       = queue   || [];
+	fixedLength = fixedLength || Infinity;
+	if(queue.length > fixedLength) {
+		throw new Error("Initializing fixed-length queue with a sequence that is too long.");
+	}
 
   function swap(i, j) { var t = queue[i]; queue[i] = queue[j]; queue[j] = t; }
 
@@ -33,29 +37,51 @@ exports.PriorityQueue = function PriorityQueue(compare, queue) {
     return t;
   }
   
-  this.removeItem = function removeItem(it) {
-  	var idx = queue.indexOf(it);
-	if(idx == -1) { return; }
-	remove(idx);
-	return it;
-  }
-
 	this.peek = function peek() {
 		return queue[0];
 	}
+	
+	//NB: assumes i is in the fringe.
+	function replaceAndBubble(elt, i) {
+		queue[i] = elt;
+		p = parent(i);
+  	while(i > 0 && compare(queue[i], queue[p]) < 0) {
+  	  swap(i, p);
+			i = p;
+			p = parent(i);
+  	}
+	}
 
-  this.push = function push(/* element, ... */) {
-    var i = queue.length, e = i + arguments.length, j, p;
-    queue.push.apply(queue, arguments);
-    for (; i < e; ++i) {
-      j = i; p = parent(i);
-      for (; j > 0 && compare(queue[j], queue[p]) < 0; j = p, p = parent(j)) {
-        swap(j, p);
-      }
-    }
-    return queue.length;
-  }
-
+	if(fixedLength == Infinity) {
+		this.push = function(element) {
+			replaceAndBubble(element, queue.length);
+			return null;
+		}
+	} else {
+		var fringeIndex = fixedLength != Infinity ? ((1+fixedLength/2) | 0) : -1;
+  	this.push = function(element) {
+			if(queue.length < fixedLength) {
+				replaceAndBubble(element, queue.length);
+				return null;
+			} else {
+				var overflow = queue[fringeIndex];
+				if(compare(overflow, queue[element]) < 0) {
+					//replace queue[fringeIndex] with element
+					queue[fringeIndex] = element;
+					replaceAndBubble(element, fringeIndex);
+				} else {
+					//let the new element overflow
+					overflow = element;
+				}
+				fringeIndex = fringeIndex + 1;
+				if(fringeIndex >= fixedLength) {
+					fringeIndex = (1+queue.length/2) | 0;
+				}
+				return overflow;
+			}
+  	}
+	}
+  	
   this.shift = function shift() { return remove(0); }
   this.__defineGetter__('length', function length() { return queue.length });
   this._queue = queue;

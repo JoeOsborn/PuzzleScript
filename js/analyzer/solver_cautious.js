@@ -16,9 +16,14 @@ var SolverCautious = (function() {
 	var DOWN = 2;
 	var RIGHT = 3;
 	var ACTION = 4;
+
+	var ITERS_PER_CONTINUATION_DEFAULT=20000;
+	var ITER_MAX_DEFAULT=1000000;
+	var FULL_STORAGE_NODES_DEFAULT=16384;
 	
-	var ITERS_PER_CONTINUATION=20000;
-	var ITER_MAX=1000000;
+	var ITERS_PER_CONTINUATION=ITERS_PER_CONTINUATION_DEFAULT;
+	var ITER_MAX=ITER_MAX_DEFAULT;
+	var FULL_STORAGE_NODES=FULL_STORAGE_NODES_DEFAULT;
 	
 	var FIRST_SOLUTION_ONLY = true;
 	//TODO: Let designer give annotations for "shortish", "mediumish", and "longish" games/levels
@@ -52,6 +57,12 @@ var SolverCautious = (function() {
 	var pooledBackupsCount = -1;
 	var backupRestores = 0, backupClears = 0;
 	
+	var reopenRequeues = 0;
+	var reopenRoots = 0;
+	var reopens = 0;
+	
+	var fullBackupRestores = 0;
+	
 	var q;
 	
 	module.startSearch = function(config) {
@@ -62,6 +73,8 @@ var SolverCautious = (function() {
 		nodeId=0;
 		backupRestores = 0;
 		backupClears = 0;
+		fullBackupRestores = 0;
+		reopens = 0;
 		var parsedSpecs = config.spec || [];
 		specs = [];
 		for(var s = 0; s < parsedSpecs.length; s++) {
@@ -91,8 +104,9 @@ var SolverCautious = (function() {
 		
 		gDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "G_DISCOUNT", gDiscount));
 		hDiscount = parseFloat(Utilities.getAnnotationValue(Solver.RULES, "H_DISCOUNT", hDiscount));
-		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", ITER_MAX));
-		ITERS_PER_CONTINUATION = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", ITERS_PER_CONTINUATION));
+		ITER_MAX = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITER_MAX", ITER_MAX_DEFAULT));
+		ITERS_PER_CONTINUATION = parseInt(Utilities.getAnnotationValue(Solver.RULES, "ITERS_PER_CONTINUATION", ITERS_PER_CONTINUATION_DEFAULT));
+		FULL_STORAGE_NODES = parseInt(Utilities.getAnnotationValue(Solver.RULES, "FULL_STORAGE_NODES", FULL_STORAGE_NODES_DEFAULT));
 
 		if (!state.levels[Solver.LEVEL] || state.levels[Solver.LEVEL].message) {
 			return {iterations:0, queueLength:0, nodeCount:0, minG:-1, minH:-1, fullyExhausted:true};
@@ -109,9 +123,8 @@ var SolverCautious = (function() {
 		open = initSet();
 		closed = initSet();
 		//Sort by F, break ties by H.
-		//q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[],32767);
-		//qq = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[]);
-		q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[]);
+		q = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[],FULL_STORAGE_NODES);
+		qq = new priority_queue.PriorityQueue(function(a,b) { return (a.f == b.f) ? (a.h - b.h) : (a.f - b.f); },[]);
 		
 		var initHDiscount = hDiscount;
 		var initGDiscount = gDiscount;
@@ -198,23 +211,6 @@ var SolverCautious = (function() {
 		return ret;
 	}
 	
-	function popQueue() {
-		var node = q.shift();
-		// if(q.length < q.fixedLength && qq.length > 0) {
-		// 	var replace = qq.shift();
-		// 	q.push(replace);
-		// }
-		return node;
-	}
-	
-	function pushQueue(n) {
-		var overflow = q.push(n);
-		// if(overflow) {
-		// 	clearBackup(overflow);
-		// 	qq.push(overflow);
-		// }
-	}
-
 	module.searchSome = function(continuation) {
 		//search a number of iterations, then return true if there is more to come
 		//up to X iterations:
@@ -222,7 +218,7 @@ var SolverCautious = (function() {
 		var lastPrintedIter = -1;
 		for(var iter=continuation; iter<continuation+ITERS_PER_CONTINUATION && iter<ITER_MAX && q.length > 0; iter++) {
 			if((iter - lastPrintedIter) >= 20000 || lastPrintedIter == -1) {
-				log("Lev:"+Solver.LEVEL+" Iter:"+iter);
+				log("Lev:"+Solver.LEVEL+" Iter:"+iter+" Q:"+q.length+" QQ:"+qq.length);
 				lastPrintedIter = iter;
 			}
 			//dequeue and move from open to closed
@@ -240,12 +236,21 @@ var SolverCautious = (function() {
 			//log("Dat:"+JSON.stringify(node.backup));
 			//just skip nodes with best paths longer than or equal to gLimit.
 			if(node.g >= gLimit) { 
-				//TODO: should it be put into closed?
+				//TODO: should it be closed?
 				continue;
 			}
 			if(node.backup == null) {
-				//TODO: remake the backup using its best predecessor (recursively). During backup reconstruction, let any non-closed node with f < cutoffF keep its backup around.
-				throw new Error("An open node had its backup removed! Too late to fix it!");
+				//It's probably fine to just switch to root and grind through firstPrefix.
+				switchToSearchState(root);
+				setBackup(node);
+				fullBackupRestores++;
+				if(fullBackupRestores % 1000 == 0) {
+					console.log("Full backup restores: "+fullBackupRestores);
+				}
+				for(var pfxi = 0; pfxi < node.firstPrefix.length; pfxi++) {
+					runCompleteStep(node.firstPrefix[pfxi], node.backup);
+				}
+				backupLevel(node.backup);
 			}
 			for(var ai = 0; ai < ACTIONS.length; ai++) {
 				var action = ACTIONS[ai];
@@ -275,7 +280,7 @@ var SolverCautious = (function() {
 				busy:true,
 				response:{
 					continuation:iter,
-					queueLength:q.length,
+					queueLength:q.length+qq.length,
 					nodeCount:nodeId,
 					minG:(q.peek() ? q.peek().g : -1),
 					minH:(q.peek() ? q.peek().h : -1)
@@ -286,7 +291,7 @@ var SolverCautious = (function() {
 				busy:false,
 				response:{
 					iterations:iter,
-					queueLength:q.length,
+					queueLength:q.length+qq.length,
 					kickstart:Solver.RANDOM_RESTART && q.length > 0 ? samplePathsFromQueue(100) : [],
 					nodeCount:nodeId,
 					minG:(q.peek() ? q.peek().g : -1),
@@ -622,25 +627,19 @@ var SolverCautious = (function() {
 		var g = pred ? pred.g+gDiscount : 0;
 		if(existingN) {
 			if(pred) {
-				//pred.successors[action] = existingN;
+				pred.successors.push({action:action, successor:existingN});
 				//log("B add "+pred.id+":"+action+" to "+existingN.id);
 				existingN.predecessors.push({action:action, predecessor:pred});
 			}
 			if(g < existingN.g) {
+				existingN.firstPrefix = pred.firstPrefix.concat([action]);
 				existingN.g = g;
-				//no need to recalculate H, since H is independent of path
-				// if(existingInOpen) {
-				//	log("Re-queueing "+existingN.id+" from old F "+existingN.f+" to new F "+(g+existingN.h));
-				// }
-				//if we are reopening a node, give it a backup again.
-				if(!existingN.backup) {
-					backupRestores++;
-					if(backupRestores % 1000 == 0) {
-						console.log("Backup restores:"+backupRestores);
-					}
-					setBackup(existingN);
-				}
 				existingN.f = existingN.g + existingN.h;
+				//no need to recalculate H, since H is independent of path
+				reopenRoots++;
+				if(reopenRoots % 1000 == 0) {
+					console.log("Reopen roots:"+reopenRoots);
+				}
 				reopenNode(existingN);
 			}
 			return existingN;
@@ -651,6 +650,7 @@ var SolverCautious = (function() {
 			id:nodeId,
 			backup:null,
 			predecessors:pred ? [{action:action, predecessor:pred}] : [],
+			successors:[],
 			firstPrefix:pred ? pred.firstPrefix.slice() : [],
 			winning:winning,
 			eventualSolutions:[],
@@ -666,6 +666,7 @@ var SolverCautious = (function() {
 		nodeId++;
 		if(pred) {
 			n.firstPrefix.push(action);
+			pred.successors.push({action:action, successor:n});
 		}
 		return n;
 	}
@@ -673,7 +674,29 @@ var SolverCautious = (function() {
 	function enqueueNode(n) {
 		exactInsert(n,open);
 		n.closed = false;
-		q.push(n);
+		pushQueue(n);
+	}
+	
+	function popQueue() {
+		var node = q.shift();
+		if(q.length < q.fixedLength && qq.length > 0) {
+		  var replace;
+		  do {
+			   replace = qq.shift();
+		  } while(replace && replace.closed);
+		  if(replace) {
+		   	q.push(replace);
+		  }
+		}
+		return node;
+	}
+	
+	function pushQueue(n) {
+		var overflow = q.push(n);
+		if(overflow && !overflow.closed) {
+			clearBackup(overflow);
+			qq.push(overflow);
+		}
 	}
 	
 	function closeNode(node) {
@@ -684,10 +707,30 @@ var SolverCautious = (function() {
 	}
 
 	function reopenNode(node) {
-		exactRemove(node,closed);
-		exactInsert(node,open);
-		node.closed = false;
-		q.push(node);
+		reopens++;
+		if(reopens % 1000 == 0) {
+			console.log("Reopens: "+reopens);
+		}
+		var g = node.g;
+		var gprime = node.g+gDiscount;
+		for(var si = 0; si < node.successors.length; si++) {
+			var s = node.successors[si];
+			if(s.successor.g <= gprime) {
+				continue;
+			}
+			s.successor.firstPrefix = node.firstPrefix.concat([s.action]);
+			s.successor.g = gprime;
+			s.successor.f = s.successor.g + s.successor.h;
+			//even if there's a cycle, it'll be broken by the <= condition above
+			reopenNode(s.successor);
+		}
+		if(!node.closed) {
+			reopenRequeues++;
+			if(reopenRequeues % 1000 == 0) {
+				console.log("Requeue after reopen:"+reopenRequeues);
+			}
+			enqueueNode(node);
+		}
 	}
 	
 	var _oA;

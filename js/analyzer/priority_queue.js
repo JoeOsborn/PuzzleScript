@@ -65,9 +65,8 @@ exports.PriorityQueue = function PriorityQueue(compare, queue, fixedLength) {
 				return null;
 			} else {
 				var overflow = queue[fringeIndex];
-				if(compare(overflow, queue[element]) < 0) {
+				if(compare(overflow, element) < 0) {
 					//replace queue[fringeIndex] with element
-					queue[fringeIndex] = element;
 					replaceAndBubble(element, fringeIndex);
 				} else {
 					//let the new element overflow

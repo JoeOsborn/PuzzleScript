@@ -2371,10 +2371,10 @@ function hashKey(rearrangeMask) {
 
 var AGAIN_LIMIT = 100;
 var againSet = [];
-function runCompleteStep(inputDir) {
+function runCompleteStep(inputDir,bak) {
 	var againIters = 0;
 	var undoStackLength = backups.length;
-	var anyResults = processInput(inputDir,false,false,null,false,true);
+	var anyResults = processInput(inputDir,false,false,bak,false,true);
 	var againLooped = false;
 	while(againing && againIters < AGAIN_LIMIT && !winning) {
 		if(!againSet[againIters]) {

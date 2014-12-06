@@ -1,12 +1,12 @@
 var testLocalGames = [
-	// "atlas shrank",
+	"atlas shrank",
 	"blockfaker",
-	"bouncers", //too hard, skip for now
+	// "bouncers", //too hard, skip for now
 	"byyourside",
 	// // "cakemonsters", //doesn't compile
 	"castlemouse",
 	// "chaos wizard",
-	"collapse",
+	// "collapse",
 	"color chained",
 	// "constellationz",
 	// "cratopia",
@@ -29,7 +29,6 @@ var testLocalGames = [
 	// "lunar_lockout",
 	// "m c eschers armageddon",
 	// "manic_ammo",
-	// "mazezam",
 	// "microban",
 	// "midas",
 	// "modality",
@@ -85,6 +84,8 @@ var testRemoteGames = [
 	// "e3e444f7c63fb21b6ec0", //cyber lasso
 	// "9027730", //Happy Birthday Hennell: Sokoban Edition 2014
 	// //forum
+	"2351b8beb7325ad5259d", //green line
+	// "7718522", //mazezam
 	// "8cbe871f8c0d59fab93b", //honey giants
 	// "4e0d1c8757978c897b93", //pumpkin smasher
 	// "6850739", //run at sign run
@@ -273,6 +274,7 @@ var testRemoteGames = [
 	// "8b6e3c506bd45c02fa54", //slide rule
 	// "e9fcda2bc6229a6f3913", //Window Hero
 	// "57ed375472fee0c7d42f", //The Explorer
+	// // "3b449742bd27af2620e9", //Tiny Farm
 	"e7b1e228531d5dc4d71c" //Subterranean Maze of Caves
 ];
 

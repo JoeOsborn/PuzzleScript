@@ -86,6 +86,7 @@ var testRemoteGames = [
 	// //forum
 	"2351b8beb7325ad5259d", //green line
 	// "7718522", //mazezam
+	// "d780c1d54dee9e081a0b", //mazezam [simplified]
 	// "8cbe871f8c0d59fab93b", //honey giants
 	// "4e0d1c8757978c897b93", //pumpkin smasher
 	// "6850739", //run at sign run

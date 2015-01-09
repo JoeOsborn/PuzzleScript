@@ -533,6 +533,129 @@ function backupLevel(inBak) {
 	return bak;
 }
 
+var dbg = 0;
+var _randomMatches = [];
+var _applyMatches = [];
+//TODO: do code gen for applyRandomRuleGroup.
+function applyRandomRuleGroup(ruleGroup) {
+	var propagated=false;
+
+	_randomMatches.length = 0;
+	var matches = _randomMatches;
+	for (var ruleIndex=0;ruleIndex<ruleGroup.length;ruleIndex++) {
+		var rule=ruleGroup[ruleIndex];
+		var ruleMatches = rule.findMatches(_applyMatches);
+		if (ruleMatches.length>0) {
+	    	var tuples  = generateTuples(ruleMatches);
+	    	for (var j=0;j<tuples.length;j++) {
+	    		var tuple=tuples[j];
+				matches.push([ruleIndex,tuple]); //ALLOC
+				/* // #IF DEBUG_EXTREME
+				console.log('RI:'+ruleIndex+' TPL:'+JSON.stringify(tuple));
+				*/ //#ENDIF
+	    	}
+		}		
+	}
+
+	if (matches.length===0)
+	{
+		return false;
+	} 
+
+	var rn = RandomGen.uniform();
+	var match = matches[(rn*matches.length)|0];
+	var ruleIndex=match[0];
+	var rule=ruleGroup[ruleIndex];
+	/* // #IF DEBUG_EXTREME
+	console.log("B rule group "+(state.rules.indexOf(ruleGroup) >= 0 ? state.rules.indexOf(ruleGroup) : state.lateRules.indexOf(ruleGroup))+" selected "+rn+" out of "+matches.length+" ("+rule.lineNumber+")");
+	*/ //#ENDIF
+	var delta = dirMasksDelta[rule.direction];
+	var tuple=match[1];
+	var check=false;
+	var modified = rule.applyAt(delta,tuple,check);
+
+	for(var c=0;c<rule.commands.length;c++) {
+		var cmd = rule.commands[c];
+		global["cmd_"+cmd[0]] = true;
+		if(cmd[0] == "message") {
+			messagetext = cmd[1];
+		}
+		if(verbose_logging) {
+			var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
+			safeConsolePrint(logMessage);
+		}
+	}
+
+	return modified;
+}
+
+Rule.prototype.applyAt = function(delta,tuple,check) {
+	var rule = this;
+	//have to double check they apply
+	//Q: why?
+    if (check) {
+        var ruleMatches=true;                
+        for (var cellRowIndex=0;cellRowIndex<rule.patterns.length;cellRowIndex++) {
+        	if (rule.isEllipsis[cellRowIndex]) {//if ellipsis
+            	if (DoesCellRowMatchWildCard(rule.direction,rule.patterns[cellRowIndex],tuple[cellRowIndex][0],
+            		tuple[cellRowIndex][1]+1, tuple[cellRowIndex][1])===false) { /* pass mink to specify */
+                    ruleMatches=false;
+                    break;
+                }
+        	} else {
+            	if (DoesCellRowMatch(rule.direction,rule.patterns[cellRowIndex],tuple[cellRowIndex])===false) {
+                    ruleMatches=false;
+                    break;
+                }
+        	}
+        }
+        if (ruleMatches === false ) {
+            return false;
+        }
+    }
+    var result=false;
+    
+    //APPLY THE RULE
+    var d0 = delta[0]*level.height;
+    var d1 = delta[1];
+    for (var cellRowIndex=0;cellRowIndex<rule.patterns.length;cellRowIndex++) {
+        var preRow = rule.patterns[cellRowIndex];
+        
+        var currentIndex = rule.isEllipsis[cellRowIndex] ? tuple[cellRowIndex][0] : tuple[cellRowIndex];
+        for (var cellIndex=0;cellIndex<preRow.length;cellIndex++) {
+            var preCell = preRow[cellIndex];
+
+            if (preCell === ellipsisPattern) {
+            	var k = tuple[cellRowIndex][1];
+            	currentIndex = (currentIndex+(d1+d0)*k)%level.n_tiles;
+            	continue;
+            }
+						/* //#IF DEBUG_EXTREME
+						console.log("replace at "+currentIndex);
+						*/ //#ENDIF
+            result = replaceCell(preCell, rule, currentIndex) || result;
+
+            currentIndex = (currentIndex+d1+d0)%level.n_tiles;
+        }
+    }
+
+	var ruleDirection = dirMaskName[rule.direction];
+	if (verbose_logging && result){
+		var logString = '<font color="green">Rule <a onclick="jumpToLine(' + rule.lineNumber + ');"  href="javascript:void(0);">' + rule.lineNumber + '</a> ' + 
+			ruleDirection + ' applied.</font>';
+		safeConsolePrint(logString);
+	}
+	if(result && applyAtWatchers && applyAtWatchers.length) {
+		var ruleLoc = rule.getGroupAndRuleIndex();
+		for(var i = 0; i < applyAtWatchers.length; i++) {
+			applyAtWatchers[i]("normal",ruleLoc.groupIndex,ruleLoc.ruleIndex,ruleDirection);
+		}
+	}
+
+    return result;
+};
+
+
 function setGameState(_state, command, randomseed) {
 	oldflickscreendat=[];
 	timer=0;
@@ -713,7 +836,7 @@ function setGameState(_state, command, randomseed) {
 			document.body.appendChild(div_container);
 			*/
 	}
-	
+	state.prelude();
 }
 
 function RebuildLevelArrays() {
@@ -1955,70 +2078,6 @@ Rule.prototype.findMatches = function(matches) {
     return matches;
 };
 
-Rule.prototype.applyAt = function(delta,tuple,check) {
-	var rule = this;
-	//have to double check they apply
-	//Q: why?
-    if (check) {
-        var ruleMatches=true;                
-        for (var cellRowIndex=0;cellRowIndex<rule.patterns.length;cellRowIndex++) {
-        	if (rule.isEllipsis[cellRowIndex]) {//if ellipsis
-            	if (DoesCellRowMatchWildCard(rule.direction,rule.patterns[cellRowIndex],tuple[cellRowIndex][0],
-            		tuple[cellRowIndex][1]+1, tuple[cellRowIndex][1])===false) { /* pass mink to specify */
-                    ruleMatches=false;
-                    break;
-                }
-        	} else {
-            	if (DoesCellRowMatch(rule.direction,rule.patterns[cellRowIndex],tuple[cellRowIndex])===false) {
-                    ruleMatches=false;
-                    break;
-                }
-        	}
-        }
-        if (ruleMatches === false ) {
-            return false;
-        }
-    }
-    var result=false;
-    
-    //APPLY THE RULE
-    var d0 = delta[0]*level.height;
-    var d1 = delta[1];
-    for (var cellRowIndex=0;cellRowIndex<rule.patterns.length;cellRowIndex++) {
-        var preRow = rule.patterns[cellRowIndex];
-        
-        var currentIndex = rule.isEllipsis[cellRowIndex] ? tuple[cellRowIndex][0] : tuple[cellRowIndex];
-        for (var cellIndex=0;cellIndex<preRow.length;cellIndex++) {
-            var preCell = preRow[cellIndex];
-
-            if (preCell === ellipsisPattern) {
-            	var k = tuple[cellRowIndex][1];
-            	currentIndex = (currentIndex+(d1+d0)*k)%level.n_tiles;
-            	continue;
-            }
-
-            result = replaceCell(preCell, rule, currentIndex) || result;
-
-            currentIndex = (currentIndex+d1+d0)%level.n_tiles;
-        }
-    }
-
-	var ruleDirection = dirMaskName[rule.direction];
-	if (verbose_logging && result){
-		var logString = '<font color="green">Rule <a onclick="jumpToLine(' + rule.lineNumber + ');"  href="javascript:void(0);">' + rule.lineNumber + '</a> ' + 
-			ruleDirection + ' applied.</font>';
-		safeConsolePrint(logString);
-	}
-	if(result && applyAtWatchers && applyAtWatchers.length) {
-		var ruleLoc = rule.getGroupAndRuleIndex();
-		for(var i = 0; i < applyAtWatchers.length; i++) {
-			applyAtWatchers[i](rule,ruleLoc.groupIndex,ruleLoc.ruleIndex,ruleDirection);
-		}
-	}
-
-    return result;
-};
-
 //N.B.: For late rules, every group index is offset by state.rules.length.
 //      The group index can only be used to retrieve a rule group from the
 //      combined set of regular and late rule groups.
@@ -2059,59 +2118,7 @@ function showTempMessage() {
 	safeCanvasResize();
 }
 
-var _randomMatches = [];
-var _applyMatches = [];
-//TODO: do code gen for applyRandomRuleGroup.
-function applyRandomRuleGroup(ruleGroup) {
-	var propagated=false;
-
-	_randomMatches.length = 0;
-	var matches = _randomMatches;
-	for (var ruleIndex=0;ruleIndex<ruleGroup.length;ruleIndex++) {
-		var rule=ruleGroup[ruleIndex];
-		var ruleMatches = rule.findMatches(_applyMatches);
-		if (ruleMatches.length>0) {
-	    	var tuples  = generateTuples(ruleMatches);
-	    	for (var j=0;j<tuples.length;j++) {
-	    		var tuple=tuples[j];
-				matches.push([ruleIndex,tuple]); //ALLOC
-	    	}
-		}		
-	}
-
-	if (matches.length===0)
-	{
-		return false;
-	} 
-
-	var match = matches[Math.floor(RandomGen.uniform()*matches.length)];
-	var ruleIndex=match[0];
-	var rule=ruleGroup[ruleIndex];
-	var delta = dirMasksDelta[rule.direction];
-	var tuple=match[1];
-	var check=false;
-	var modified = rule.applyAt(delta,tuple,check);
-
-	for(var c=0;c<rule.commands.length;c++) {
-		var cmd = rule.commands[c];
-		global["cmd_"+cmd[0]] = true;
-		if(cmd[0] == "message") {
-			messagetext = cmd[1];
-		}
-		if(verbose_logging) {
-			var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
-			safeConsolePrint(logMessage);
-		}
-	}
-
-	return modified;
-}
-
 function applyRuleGroup(ruleGroup) {
-	if (ruleGroup[0].isRandom) {
-		return applyRandomRuleGroup(ruleGroup);
-	}
-
 	var loopPropagated=false;
     var propagated=true;
     var loopcount=0;
@@ -2124,7 +2131,7 @@ function applyRuleGroup(ruleGroup) {
     	}
         propagated=false;
         for (var ruleIndex=0;ruleIndex<ruleGroup.length;ruleIndex++) {
-            var rule = ruleGroup[ruleIndex];            
+            var rule = ruleGroup[ruleIndex];  
             propagated = rule.tryApply() || propagated;
         }
         if (propagated) {
@@ -2140,14 +2147,15 @@ function applyRules(rules, loopPoint, startRuleGroupindex, bannedGroup){
     //try to match it
 
     //when we're going back in, let's loop, to be sure to be sure
+	var ruleGroupFns = state.rules == rules ? state.ruleGroupFns : state.lateRuleGroupFns;
     var loopPropagated = startRuleGroupindex>0;
     var loopCount = 0;
     for (var ruleGroupIndex=startRuleGroupindex;ruleGroupIndex<rules.length;) {
     	if (bannedGroup && bannedGroup[ruleGroupIndex]) {
     		//do nothing
     	} else {
-    		var ruleGroup=rules[ruleGroupIndex];
-			loopPropagated = applyRuleGroup(ruleGroup) || loopPropagated;
+    		var ruleGroupFn=ruleGroupFns[ruleGroupIndex];
+				loopPropagated = ruleGroupFn(rules[ruleGroupIndex]) || loopPropagated;
 	    }
         if (loopPropagated && loopPoint[ruleGroupIndex]!==undefined) {
         	ruleGroupIndex = loopPoint[ruleGroupIndex];
@@ -2602,7 +2610,7 @@ function runAllRules(dir,bak) {
 	
 	if (verbose_logging){safeConsolePrint('applying late rules');}
 	applyRules(state.lateRules, state.lateLoopPoint, 0);
-	startRuleGroupIndex=0;		
+	startRuleGroupIndex=0;	
 }
 
 function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {

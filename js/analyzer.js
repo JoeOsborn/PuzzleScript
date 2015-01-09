@@ -288,8 +288,9 @@ var Analyzer = (function() {
 		}
 	}
 		
-	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
+	function ruleApplied(normalOrLate,ruleGroup,ruleIndex,direction,tuple) {
 		if(module.mode != module.MODE_NORMAL) { return; }
+		var rule = (normalOrLate == "normal" ? state.rules[ruleGroup][ruleIndex] : state.lateRules[ruleGroup][ruleIndex]);
 		Utilities.incrementRuleCount(storedRuleCounts,curlevel,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
 		if(getRuleCountMode() == RC_MODE_INTERACTIVE) {
 			var l = rule.lineNumber-1;

@@ -4,6 +4,7 @@ var Utilities = (function() {
 	module.RC_CATEGORY_WIN = "rc-win";
 	module.RC_CATEGORY_INTERACTIVE = "rc-interactive";
 	
+	//FIXME: doesn't distinguish normal vs late rules.
 	module.incrementRuleCount = function incrementRuleCount(counts,lev,cat,ruleGroup,ruleIndex) {
 		if(!counts[lev]) {
 			counts[lev] = {};

@@ -80,7 +80,7 @@ var Solver = (function() {
 	var storedRuleCounts;
 	var storedRuleCategory = Utilities.RC_CATEGORY_WIN;
 	
-	function ruleApplied(rule,ruleGroup,ruleIndex,direction) {
+	function ruleApplied(normalOrLate,ruleGroup,ruleIndex,direction) {
 		Utilities.incrementRuleCount(storedRuleCounts,module.LEVEL,storedRuleCategory,ruleGroup,ruleIndex);
 	};
 

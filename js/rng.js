@@ -98,6 +98,8 @@ function print_call_stack() {
  * @constructor
  */
 function RNG(seed) {
+	// console.log("Construct "+seed);
+	// seed = 1;
     this.seed = seed;
     if (seed == null) {
         seed = (Math.random() + Date.now()).toString();
@@ -108,7 +110,11 @@ function RNG(seed) {
         // Use it as a uniform number generator
         this.uniform = seed;
         this.nextByte = function() {
-            return ~~(this.uniform() * 256);
+						/* //#IF DEBUG_EXTREME
+						console.log("RCOUNT:"+rcount);
+						rcount++;
+						*/ //#ENDIF
+	          return ~~(this.uniform() * 256);
         };
         seed = null;
     } else if (Object.prototype.toString.call(seed) !== '[object String]' && seed.constructor !== RNG) {
@@ -132,8 +138,15 @@ function RNG(seed) {
 /**
  * @return {number} Uniform random number between 0 and 255.
  */
+/* //#IF DEBUG_EXTREME
+var rcount = 0;
+*/ //#ENDIF
 RNG.prototype.nextByte = function() {
-    return this._state.next();
+		/* //#IF DEBUG_EXTREME
+		console.log("RCOUNT:"+rcount);
+		rcount++;
+		*/ //#ENDIF
+		return this._state.next();
 };
 
 /**

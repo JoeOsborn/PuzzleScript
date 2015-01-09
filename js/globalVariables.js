@@ -26,9 +26,13 @@ var winning=false;
 var againing=false;
 var againinterval=150;
 var norepeat_action=false;
-var oldflickscreendat=[];//used for buffering old flickscreen/scrollscreen positions, in case player vanishes
+var oldflickscreendat=[]; //used for buffering old flickscreen/scrollscreen positions, in case player vanishes
 var keybuffer = [];
 
+// Whether to run both old and new code to check small-step equivalence
+var bisimulate = false;
+// Whether to aim for the behavior most consistent with the reference implementation, even down to hacks
+var extreme_consistency = true;
 
 var messageselected=false;
 

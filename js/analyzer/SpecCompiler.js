@@ -978,7 +978,7 @@ var SpecCompiler = (function() {
 					//We know that these kinds have rule have only one pattern.
 					var matchFn = "spec_"+spec.range.start.line+"_"+specID+"_p1d_match_"+i;
 					compileMatchFunction(state, matchFn, rule, 0);
-					checks = checks.concat(generateMatchLoops("p1d_"+specID+"_"+i+"_",rule,[matchFn],
+					checks = checks.concat(generateMatchLoops("p1d_"+specID+"_"+i+"_",rule,MATCH_RELAXED_CONSISTENCY,[matchFn],
 						function occ(_prefix, _rule, _indices, _ks) {
 							return rest([anyTrue+" = true;"].concat(trueA), []);
 						}

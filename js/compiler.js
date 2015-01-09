@@ -2512,7 +2512,7 @@ StringStream.prototype = {
     finally { this.lineStart -= n; }
   }
 };
-  
+
 var MAX_ERRORS=5;
 function loadFile(str) {
 	safeConsolePrint('loadFile');
@@ -2565,9 +2565,11 @@ function loadFile(str) {
 
 	generateLoopPoints(state);
 	
+	analyzeRuleGroups(state);
+	compilePrelude(state);
 	compileRules(state,state.rules,"");
 	compileRules(state,state.lateRules,"late_");
-
+	
 	var cmds = [];
 	var clearCmds = [];
 	var playSfx = [];
@@ -2679,7 +2681,9 @@ function compile(command,text,randomseed) {
 
 var global = this;
 
-function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
+var MATCH_RELAXED_CONSISTENCY = "relaxed";
+var MATCH_STRONG_CONSISTENCY = "strong";
+function generateMatchLoops(prefix, rule, mode, checkFns, matchOccurred) {
 	prefix = prefix || "";
 	var dir = rule.direction;
 	var delta = prefix+"delta";
@@ -2833,11 +2837,16 @@ function generateMatchLoops(prefix, rule, checkFns, matchOccurred) {
 			matchLabels[p] = ellipsisLoopLabel;
 			post.unshift("}");
 		}
+		if(mode == MATCH_RELAXED_CONSISTENCY) {
+			body.push("if(!"+matchChecks[p]+") { continue "+matchLabels[p]+"; }");
+		}
 		if(p == rule.patterns.length-1) {
-			for(var pm = 0; pm < rule.patterns.length; pm++) {
-				body.push("if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }")
+			if(mode == MATCH_STRONG_CONSISTENCY) {
+				for(var pm = 0; pm < rule.patterns.length; pm++) {
+					body.push("if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }");
+				}
 			}
-			body = body.concat(matchOccurred(prefix, prefix+"delta", idxs, ks));
+			body = body.concat(matchOccurred(prefix, delta, idxs, ks));
 		}
 	}
 	return body.concat(post);
@@ -3090,94 +3099,421 @@ function compileCellReplaceFn(state, name, rule, pm, ci) {
 	return name;
 }
 
+function compileRandomRuleGroup(state,rules,prefix,i) {
+	var ruleGroup = rules[i];
+	var functionBody = ["currentRandomGroupMatch = 0|0;"];
+	for(var j = 0; j < ruleGroup.length; j++) {
+		var rule = ruleGroup[j];
+		var cellMatchFns = [];
+		for(var pm = 0; pm < rule.patterns.length; pm++) {
+			cellMatchFns[pm] = prefix+"match_"+i+"_"+j+"_"+pm;
+			compileMatchFunction(state, cellMatchFns[pm], rule, pm);
+		}
+		functionBody = functionBody.concat(generateMatchLoops("r"+j+"_", rule, MATCH_RELAXED_CONSISTENCY, cellMatchFns, 
+			function matchOccurred(_prefix, delta, indices, ks) {
+				var matchAction = [
+					"var matchIdx = currentRandomGroupMatch*"+state.randomGroupMatchStride+";",
+					"randomGroupMatches[matchIdx] = "+j+";"
+				];
+				for(var pat = 0; pat < rule.patterns.length; pat++) {
+					matchAction.push("randomGroupMatches[matchIdx+"+(1+pat*2)+"] = "+indices[pat]+";");
+					if(rule.isEllipsis[pat]) {
+						matchAction.push("randomGroupMatches[matchIdx+"+(1+pat*2+1)+"] = "+ks[pat]+";");
+					}
+				}
+			 	matchAction.push("currentRandomGroupMatch++;");
+				/* // #IF DEBUG_EXTREME
+				matchAction.push("console.log('RI:'+"+j+"+' TPL:'+JSON.stringify(randomGroupMatches.subarray(matchIdx+1,matchIdx+1+"+rule.patterns.length*2+")));");
+				*/ //#ENDIF
+				return matchAction;
+			}
+		));
+	}
+	
+	var allLineNumbers = ruleGroup.map(function(r) { return r.lineNumber; });
+	functionBody.push(
+		"if(currentRandomGroupMatch == 0) { return false; }",
+		"var rn = RandomGen.uniform();",
+		"var selectedMatch = (rn*currentRandomGroupMatch)|0;",
+		"var selectedRule = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"]",
+		/* // #IF DEBUG_EXTREME
+		"console.log('A rule group "+i+" selected '+rn+' out of '+currentRandomGroupMatch+' ('+"+JSON.stringify(allLineNumbers)+"[selectedRule]+')');",
+		*/ //#ENDIF
+		"var result = false;"
+	);
+	functionBody.push("switch(selectedRule) {");
+	for(var j = 0; j < ruleGroup.length; j++) {
+		functionBody.push(
+			"case "+j+":"
+		);
+		var delta = "r"+j+"_delta";
+		var rule = ruleGroup[j];
+		if(rule.hasReplacements) {
+			var cellReplaceFns = [];
+			var indices = [];
+			var ks = [];
+			for(var p = 0; p < rule.patterns.length; p++) {
+				indices[p] = "idx"+j+"_"+p;
+				functionBody.push("var "+indices[p]+" = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"+"+(1+2*p)+"];");
+				if(rule.isEllipsis[p]) {
+					ks[p] = "k"+j+"_"+p;
+					functionBody.push("var "+ks[p]+" = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"+"+(1+2*p+1)+"];");
+				}
+				cellReplaceFns[p] = [];
+				for(var ci = 0; ci < rule.patterns[p].length; ci++) {
+					cellReplaceFns[p][ci] = prefix+"replaceCell"+i+"_"+j+"_"+p+"_"+ci;
+					if(!compileCellReplaceFn(state, cellReplaceFns[p][ci],rule,p,ci)) {
+						delete cellReplaceFns[p][ci];
+					}
+				}
+			}
+			functionBody = functionBody.concat([
+	    	"var targetIndex = 0|0;"
+	    ]).concat([].concat.apply([],rule.patterns.map(function(pattern, pm, _) {
+		    	var ci = "cellRow"+pm;
+		    	return [
+			  		"targetIndex = "+indices[pm]+";"
+			  	].concat([].concat.apply([],pattern.map(function(cell, ci, _) {
+		    		return cell === ellipsisPattern ? 
+			  			["targetIndex += "+delta+" * "+ks[pm]+";"] :
+			  			[
+								/* //#IF DEBUG_EXTREME
+								cell.replacement ? "console.log('replace at '+targetIndex);" : "",
+								*/ //#ENDIF				
+			  				cell.replacement ? "result = "+cellReplaceFns[pm][ci]+"(targetIndex) || result;" : "",
+			  				(ci < pattern.length-1) ? "targetIndex += "+delta+";" : ""
+			  			]
+		    	})));
+		    }))
+			);
+		}
+		functionBody.push(
+			"if("+(ruleGroup[j].hasReplacements?"result && ":"")+"applyAtWatchers) {",
+				"for(var w = 0; w < applyAtWatchers.length; w++) {",
+					"applyAtWatchers[w]("+(rules == state.rules ? "\"normal\"" : "\"late\"")+","+i+","+j+","+rule.direction+");",
+				"}",
+			"}"
+		);
+		//apply commands
+		for(var c=0;c<rule.commands.length;c++) {
+			var cmd = rule.commands[c];
+			functionBody.push("cmd_"+cmd[0]+" = true;");
+			if(cmd[0] == "message") {
+				functionBody.push("messagetext = "+cmd[1]+";");
+			}
+			if(verbose_logging) {
+				var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
+				functionBody.push("safeConsolePrint("+logMessage+");");
+			}
+		}
+		functionBody.push(
+			"break;"
+		);
+	}
+	functionBody.push("}");
+	functionBody.push("return result;");
+	
+	var applyGroupName = prefix+"_applyRandomRuleGroup_"+i;
+	evalCode("function "+applyGroupName+"(ruleGroup) {\n"+functionBody.join("\n")+"\n}");
+	var applyFn = bisimulate ? createBisimulateGroupFn(applyRandomRuleGroup,applyGroupName) : global[applyGroupName];
+	if(rules == state.rules) {
+		state.ruleGroupFns[i] = applyFn;
+	} else if(rules == state.lateRules) {
+		state.lateRuleGroupFns[i] = applyFn;
+	}
+}
+
+function createBisimulateGroupFn(regular,applyGroupName) {
+	return function(rg) {
+		//store all state -- cmd_*, level.objects, level.movements
+		var objs = new Int32Array(level.objects);
+		var movs = new Int32Array(level.movements);
+		var rc = rcount;
+		var state = RandomGen._state.copy();
+		var resultA = global[applyGroupName](rg);
+		var aObjs = new Int32Array(level.objects);
+		var aMovs = new Int32Array(level.movements);
+		//restore all state
+		rcount = rc;
+		RandomGen._state = state;
+		level.objects = objs;
+		level.movements = movs;
+
+		objs = new Int32Array(objs);
+		movs = new Int32Array(movs);
+		state = state.copy();
+
+		var resultB = regular(rg);
+		//compare state
+		var wrong = false;
+		if(resultA != resultB) {
+			console.log("Inconsistent application result "+resultA+" (new) vs "+resultB+" (old) after rule group "+i+" first at "+rg[0].lineNumber);
+			wrong = true;
+		} else {
+			for(var idx = 0; idx < objs.length; idx++) {
+				if(aObjs[idx] != level.objects[idx]) {
+					console.log("WRONG object at "+idx+" after rule group "+i+" first at "+rg[0].lineNumber+"; got "+level.objects[idx]+", expected "+aObjs[idx]);
+					wrong = true;
+				}
+				if(aMovs[idx] != level.movements[idx]) {
+					console.log("WRONG movement at "+idx+" after rule group "+i+" first at "+rg[0].lineNumber+"; got "+level.movments[idx]+", expected "+aMovs[idx]);
+					wrong = true;
+				}
+			}
+		}
+		if(wrong) {
+			rcount = rc;
+			RandomGen._state = state;
+			level.objects = objs;
+			level.movements = movs;
+
+			objs = new Int32Array(objs);
+			movs = new Int32Array(movs);
+			state = state.copy();
+			
+			global[applyGroupName](rg);
+			
+			rcount = rc;
+			RandomGen._state = state;
+			level.objects = objs;
+			level.movements = movs;
+			regular(rg);
+		}
+		return resultB;
+	}
+}
+
+function compileRule(state,rules,prefix,i,j) {
+	var ruleGroup = rules[i];
+	var rule = ruleGroup[j];
+	var cellMatchFns = [];
+	var cellReplaceFns = [];
+	for(var pm = 0; pm < rule.patterns.length; pm++) {
+		cellMatchFns[pm] = prefix+"match_"+i+"_"+j+"_"+pm;
+		compileMatchFunction(state, cellMatchFns[pm], rule, pm);
+		if(rule.hasReplacements) {
+			cellReplaceFns[pm] = [];
+			for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
+				cellReplaceFns[pm][ci] = prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci;
+				if(!compileCellReplaceFn(state, cellReplaceFns[pm][ci],rule,pm,ci)) {
+					delete cellReplaceFns[pm][ci];
+				}
+			}
+		}
+	}
+	var functionBody = [
+		"var anyMatches = false;",
+		(rule.hasReplacements ? "var anyApplications = false;" : "")
+	].concat(generateMatchLoops("", rule, MATCH_STRONG_CONSISTENCY, cellMatchFns, 
+		function matchOccurred(_prefix, delta, indices, ks) {
+			return [
+		  	"anyMatches = true;"
+		  ].
+			concat(rule.hasReplacements ? 
+				[
+		    	"var result = false;",
+		    	"var targetIndex = 0|0;"
+		    ].concat([].concat.apply([],rule.patterns.map(function(pattern, pm, _) {
+		    	var ci = "cellRow"+pm;
+		    	return [
+			  		"targetIndex = "+indices[pm]+";"
+			  	].concat([].concat.apply([],pattern.map(function(cell, ci, _) {
+		    		return cell === ellipsisPattern ? 
+			  			["targetIndex += "+delta+" * "+ks[pm]+";"] :
+			  			[
+								/* //#IF DEBUG_EXTREME
+								cell.replacement ? "console.log('replace at '+targetIndex);" : "",
+								*/ //#ENDIF
+			  				cell.replacement ? "result = "+cellReplaceFns[pm][ci]+"(targetIndex) || result;" : "",
+			  				(ci < pattern.length-1) ? "targetIndex += "+delta+";" : ""
+			  			]
+		    	})));
+		    }))).concat("anyApplications = result || anyApplications;") :
+				[]
+			).
+			concat(verbose_logging ?
+				[
+					(rule.hasReplacements ? "if(result) {":""),
+					"safeConsolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[rule.direction] + " applied.</font>');",
+			   	(rule.hasReplacements ? "}":"")
+				] :
+				[]
+			).concat([
+				"if("+(rule.hasReplacements?"result && ":"")+"applyAtWatchers) {",
+				"for(var w = 0; w < applyAtWatchers.length; w++) {",
+				"applyAtWatchers[w]("+(rules == state.rules ? "\"normal\"" : "\"late\"")+","+i+","+j+","+rule.direction+");",
+				"}",
+				"}"
+			]);
+		}
+	));
+	var queueCommands = [];
+	if(rule.commands && rule.commands.length) {
+		queueCommands.push("if(anyMatches) {");
+		for(var c=0;c<rule.commands.length;c++) {
+			var cmd = rule.commands[c];
+			queueCommands.push("cmd_"+cmd[0]+" = true;");
+			if(cmd[0] == "message") { queueCommands.push("messagetext = \""+cmd[1].replace(/\"/g,"\\\"")+"\";"); }
+			if(verbose_logging) {
+				var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
+				queueCommands.push("safeConsolePrint('"+logMessage+"');");
+			}
+		}
+		queueCommands.push("}");
+	}
+	var ruleFunction = 
+		"function "+prefix+"rule"+i+"_"+j+"() {\n"+
+			(functionBody.
+				concat(queueCommands).
+				concat(rule.hasReplacements ? ["return anyApplications;"] : ["return false;"])).
+			join("\n")+
+		"\n}";
+	evalCode(ruleFunction);
+	//the matchFunctions and replaceFunctions are already compiled
+	rule.tryApplyFn = global[prefix+"rule"+i+"_"+j];
+}
+
+function compileRegularRuleGroup(state,rules,prefix,i) {
+	var ruleGroup = rules[i];
+	var ruleFnNames = [];
+	for(var j = 0; j < ruleGroup.length; j++) {
+		compileRule(state,rules,prefix,i,j);
+		ruleFnNames.push(prefix+"rule"+i+"_"+j);
+	}
+	
+	var functionBody = [
+		"var loopPropagated=false;",
+	  "var propagated=true;",
+	  "var loopcount=0;",
+	  "while(propagated) {",
+			"loopcount++;",
+			"if (loopcount>200) ",
+			"{",
+				"logErrorCacheable('Got caught looping lots in a rule group :O',ruleGroup[0].lineNumber,true);",
+				"break;",
+			"}",
+			"propagated=false;"
+	];
+	for(var j = 0; j < ruleGroup.length; j++) {
+		functionBody.push(
+			"propagated = "+ruleFnNames[j]+"() || propagated;"
+		);
+	}
+	functionBody.push(
+			"if (propagated) {",
+				"loopPropagated=true;",
+			"}",
+		"}",
+		"return loopPropagated;"
+	);
+	var applyGroupName = prefix+"_applyRuleGroup_"+i;
+	evalCode("function "+applyGroupName+"(ruleGroup) {\n"+functionBody.join("\n")+"\n}");	
+	var applyFn = bisimulate ? createBisimulateGroupFn(applyRuleGroup,applyGroupName) : global[applyGroupName];
+	if(rules == state.rules) {
+		state.ruleGroupFns[i] = applyFn;
+	} else if(rules == state.lateRules) {
+		state.lateRuleGroupFns[i] = applyFn;
+	}
+}
+
+// This function reverses each rule's pattern order so that
+// random-group matches happen in same order as the
+//  findMatches/generateTuples pair produces. generateTuples 
+// transposes the match lists, and this achieves the same effect.
+function reverseRuleGroupPatternOrders(ruleGroup) {
+	for(var j = 0; j < ruleGroup.length; j++) {
+		ruleGroup[j].patterns.reverse();
+		ruleGroup[j].cellRowMasks.reverse();
+		ruleGroup[j].cellRowMatches.reverse();
+		ruleGroup[j].isEllipsis.reverse();
+	}
+}
+
 function compileRules(state,rules,prefix) {
+	if(rules == state.rules) {
+		state.ruleGroupFns = [];
+	} else if(rules == state.lateRules) {
+		state.lateRuleGroupFns = [];
+	}
 	for(var i = 0; i < rules.length; i++) {
 		var ruleGroup = rules[i];
-		for(var j = 0; j < ruleGroup.length; j++) {
-			var rule = ruleGroup[j];
-			var cellMatchFns = [];
-			var cellReplaceFns = [];
-			for(var pm = 0; pm < rule.patterns.length; pm++) {
-				cellMatchFns[pm] = prefix+"match_"+i+"_"+j+"_"+pm;
-				compileMatchFunction(state, cellMatchFns[pm], rule, pm);
-				if(rule.hasReplacements) {
-					cellReplaceFns[pm] = [];
-					for(var ci = 0; ci < rule.patterns[pm].length; ci++) {
-						cellReplaceFns[pm][ci] = prefix+"replaceCell"+i+"_"+j+"_"+pm+"_"+ci;
-						if(!compileCellReplaceFn(state, cellReplaceFns[pm][ci],rule,pm,ci)) {
-							delete cellReplaceFns[pm][ci];
-						}
-					}
-				}
-			}
-			var functionBody = [
-				"var anyMatches = false;",
-				(rule.hasReplacements ? "var anyApplications = false;" : "")
-			].concat(generateMatchLoops("", rule, cellMatchFns, 
-				function matchOccurred(_prefix, delta, indices, ks) {
-					return [
-				  	"anyMatches = true;"
-				  ].
-					concat(rule.hasReplacements ? 
-						[
-				    	"var result = false;",
-				    	"var targetIndex = 0|0;"
-				    ].concat([].concat.apply([],rule.patterns.map(function(pattern, pm, _) {
-				    	var ci = "cellRow"+pm;
-				    	return [
-					  		"targetIndex = "+indices[pm]+";"
-					  	].concat([].concat.apply([],pattern.map(function(cell, ci, _) {
-				    		return cell === ellipsisPattern ? 
-					  			["targetIndex += "+delta+" * "+ks[pm]+";"] :
-					  			[
-					  				cell.replacement ? "result = "+cellReplaceFns[pm][ci]+"(targetIndex) || result;" : "",
-					  				(ci < pattern.length-1) ? "targetIndex += "+delta+";" : ""
-					  			]
-				    	})));
-				    }))).concat("anyApplications = result || anyApplications;") :
-						[]
-					).
-					concat(verbose_logging ?
-						[
-							(rule.hasReplacements ? "if(result) {":""),
-							"safeConsolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[rule.direction] + " applied.</font>');",
-					   	(rule.hasReplacements ? "}":"")
-						] :
-						[]
-					).concat([
-						"if("+(rule.hasReplacements?"result && ":"")+"applyAtWatchers) {",
-						"for(var w = 0; w < applyAtWatchers.length; w++) {",
-						"applyAtWatchers[w](rule,"+i+","+j+","+rule.direction+");",
-						"}",
-						"}"
-					]);
-				}
-			));
-			var queueCommands = [];
-			if(rule.commands && rule.commands.length) {
-				queueCommands.push("if(anyMatches) {");
-				for(var c=0;c<rule.commands.length;c++) {
-					var cmd = rule.commands[c];
-					queueCommands.push("cmd_"+cmd[0]+" = true;");
-					if(cmd[0] == "message") { queueCommands.push("messagetext = \""+cmd[1].replace(/\"/g,"\\\"")+"\";"); }
-					if(verbose_logging) {
-						var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
-						queueCommands.push("safeConsolePrint('"+logMessage+"');");
-					}
-				}
-				queueCommands.push("}");
-			}
-			var ruleFunction = 
-				"function "+prefix+"rule"+i+"_"+j+"(rule) {\n"+
-					(functionBody.
-						concat(queueCommands).
-						concat(rule.hasReplacements ? ["return anyApplications;"] : ["return false;"])).
-					join("\n")+
-				"\n}";
-			evalCode(ruleFunction);
-			//the matchFunctions and replaceFunctions are already compiled
-			rule.tryApplyFn = global[prefix+"rule"+i+"_"+j];
+		if(ruleGroup[0].isRandom) {
+			//consistency hack: for random rule groups, findMatches/generateTuple act
+			// as if the patterns are reversed. This fixes the inconsistency in "Threes".
+			// For regular rule groups this is not the case, but I honestly don't know
+			// why -- if this hack is used for regular groups too, then the "drop swap 3"
+			// test fails.
+			if(extreme_consistency) { reverseRuleGroupPatternOrders(ruleGroup); }
+			compileRandomRuleGroup(state,rules,prefix,i);
+			if(extreme_consistency) { reverseRuleGroupPatternOrders(ruleGroup); }
+			//end consistency hack
+		} else {
+			compileRegularRuleGroup(state,rules,prefix,i);
 		}
+	}
+}
+
+function analyzeRuleGroups(state) {
+	var allGroups = state.rules.concat(state.lateRules);
+	state.maxLevelDimension = 0;
+	state.maxLevelSize = 0;
+	
+	for(var i = 0; i < state.levels.length; i++) {
+		if(state.levels[i].message) { continue; }
+		state.maxLevelDimension = Math.max(state.maxLevelDimension, state.levels[i].width, state.levels[i].height);
+		state.maxLevelSize = Math.max(state.maxLevelSize, state.levels[i].n_tiles);
+	}
+
+	state.randomRuleGroupMaxRuleCount = 0;
+	state.randomRuleGroupMaxMatchCount = 0;
+	state.randomRuleGroupMaxPatternCount = 0;
+	
+	for(var i = 0; i < allGroups.length; i++) {
+		if(allGroups[i][0].isRandom) {
+			var groupSize = allGroups[i].length;
+			state.randomRuleGroupMaxRuleCount = Math.max(state.randomRuleGroupMaxRuleCount, groupSize);
+			var groupMaxMatchCount = 0;
+			for(var j = 0; j < groupSize; j++) {
+				var rule = allGroups[i][j];
+				rule.patternMaxMatchCounts = [];
+				rule.maxMatchCount = 0;
+				state.randomRuleGroupMaxPatternCount = Math.max(state.randomRuleGroupMaxPatternCount, rule.patterns.length);
+				for(var k = 0; k < rule.patterns.length; k++) {
+					rule.patternMaxMatchCounts[k] = state.maxLevelSize;
+					if(rule.isEllipsis[k]) {
+						rule.patternMaxMatchCounts[k] *= state.maxLevelDimension;
+					}
+					if(k == 0) {
+						rule.maxMatchCount = rule.patternMaxMatchCounts[k];
+					} else {
+						rule.maxMatchCount *= rule.patternMaxMatchCounts[k];
+					}
+				}
+				groupMaxMatchCount += rule.maxMatchCount;
+			}
+			state.randomRuleGroupMaxMatchCount = Math.max(state.randomRuleGroupMaxMatchCount, groupMaxMatchCount);
+		}
+	}
+	state.randomGroupMatchStride = 1+2*state.randomRuleGroupMaxPatternCount;
+}
+
+function compilePrelude(state) {
+	state.preludeName = "__prelude";
+	state.prelude = function() {};
+	if(state.randomRuleGroupMaxRuleCount != 0) {
+		var maxMatchSize = state.randomRuleGroupMaxMatchCount*(1+2*state.randomRuleGroupMaxPatternCount);
+		var preludeGlobals = [
+			"var randomGroupMatches = new Int32Array("+maxMatchSize+");",
+			"var currentRandomGroupMatch = 0|0;"
+		];
+		var preludeBody = [
+			"currentRandomGroupMatch = 0|0;"
+		];
+		evalCode(
+			preludeGlobals.join("\n")+"\n"+
+			"function "+state.preludeName+"() {\n"+preludeBody.join("\n")+"\n"+"}"
+		);
+		state.prelude = global[state.preludeName];
 	}
 }
 

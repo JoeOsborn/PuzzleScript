@@ -2758,13 +2758,21 @@ function generateMatchLoops(prefix, rule, options, checkFns, matchOccurred) {
 		body.push("var "+xmax+" = "+xmaxDef+";");
 		body.push("var "+ymax+" = "+ymaxDef+";");
 		
-		var ops = rule.patterns[p][0].objectsPresent.clone();
-		for(var obj = 0; obj < 32*STRIDE_OBJ; obj++) {
-			if(ops.get(obj)) {
-				body.push("if(level.objectFirstRows["+obj+"] > "+ymin+") { "+ymin+" = level.objectFirstRows["+obj+"]; }");
-				body.push("if(level.objectFirstCols["+obj+"] > "+xmin+") { "+xmin+" = level.objectFirstCols["+obj+"]; }");
-				body.push("if(level.objectLastRows["+obj+"]+1 < "+ymax+") { "+ymax+" = level.objectLastRows["+obj+"]+1; }");
-				body.push("if(level.objectLastCols["+obj+"]+1 < "+xmax+") { "+xmax+" = level.objectLastCols["+obj+"]+1; }");
+		var CELL_BBOXES_CONSIDERED = 1;
+		for(var cell = 0; cell < Math.min(CELL_BBOXES_CONSIDERED,rule.patterns[p].length); cell++) {
+			var ops = rule.patterns[p][cell].objectsPresent;
+			if(rule.isEllipsis[p]) {
+				//can't use any data from the rest of the cells.
+				break;
+			}
+			if(!ops) { continue; }
+			for(var obj = 0; obj < 32*STRIDE_OBJ; obj++) {
+				if(ops.get(obj)) {
+					body.push("if(level.objectFirstRows["+obj+"]-("+dirMasksDelta[dir][1]*cell+") > "+ymin+") { "+ymin+" = level.objectFirstRows["+obj+"]-("+dirMasksDelta[dir][1]*cell+"); }");
+					body.push("if(level.objectFirstCols["+obj+"]-("+dirMasksDelta[dir][0]*cell+") > "+xmin+") { "+xmin+" = level.objectFirstCols["+obj+"]-("+dirMasksDelta[dir][0]*cell+"); }");
+					body.push("if(level.objectLastRows["+obj+"]-("+dirMasksDelta[dir][1]*cell+")+1 < "+ymax+") { "+ymax+" = level.objectLastRows["+obj+"]-("+dirMasksDelta[dir][1]*cell+")+1; }");
+					body.push("if(level.objectLastCols["+obj+"]-("+dirMasksDelta[dir][0]*cell+")+1 < "+xmax+") { "+xmax+" = level.objectLastCols["+obj+"]-("+dirMasksDelta[dir][0]*cell+")+1; }");
+				}
 			}
 		}
 		

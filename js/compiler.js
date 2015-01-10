@@ -2569,7 +2569,7 @@ function loadFile(str) {
 	compilePrelude(state);
 	compileRules(state,state.rules,"");
 	compileRules(state,state.lateRules,"late_");
-	
+
 	var cmds = [];
 	var clearCmds = [];
 	var playSfx = [];
@@ -2683,7 +2683,8 @@ var global = this;
 
 var MATCH_RELAXED_CONSISTENCY = "relaxed";
 var MATCH_STRONG_CONSISTENCY = "strong";
-function generateMatchLoops(prefix, rule, mode, checkFns, matchOccurred) {
+var MATCH_TRANSPOSE_PATTERNS = "transpose";
+function generateMatchLoops(prefix, rule, options, checkFns, matchOccurred) {
 	prefix = prefix || "";
 	var dir = rule.direction;
 	var delta = prefix+"delta";
@@ -2692,10 +2693,12 @@ function generateMatchLoops(prefix, rule, mode, checkFns, matchOccurred) {
 	var ks = [];
 	var idxs = [];
 	var masks = [];
+	
+	var transpose = options.indexOf(MATCH_TRANSPOSE_PATTERNS) != -1;
 
 	var body = ["var "+delta+" = ("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height)|0;"];
 	var post = [];
-	for(var pm = 0; pm < rule.patterns.length; pm++) {
+	for(var pm = (transpose ? rule.patterns.length-1 : 0); (transpose ? pm >= 0 : pm < rule.patterns.length); (transpose ? pm-- : pm++)) {
 		if(!(pm in masks)) { masks[pm] = []; }
 		for(var idx = 0; idx < rule.cellRowMasks[pm].data.length; idx++) {
 			masks[pm][idx] = prefix+"mask_"+pm+"_"+idx;
@@ -2712,7 +2715,7 @@ function generateMatchLoops(prefix, rule, mode, checkFns, matchOccurred) {
 		body.push(maskCheck);
 		post.unshift("}");
 	}
-	for(var p = 0; p < rule.patterns.length; p++) {
+	for(var p = (transpose ? rule.patterns.length-1 : 0); (transpose ? p >= 0 : p < rule.patterns.length); (transpose ? p-- : p++)) {
 		matchLabels[p] = prefix+"seek_"+p;
 		idxs[p] = prefix+"idx_"+p;
 		var x = prefix+"x_"+p;
@@ -2837,12 +2840,12 @@ function generateMatchLoops(prefix, rule, mode, checkFns, matchOccurred) {
 			matchLabels[p] = ellipsisLoopLabel;
 			post.unshift("}");
 		}
-		if(mode == MATCH_RELAXED_CONSISTENCY) {
+		if(options.indexOf(MATCH_RELAXED_CONSISTENCY) != -1) {
 			body.push("if(!"+matchChecks[p]+") { continue "+matchLabels[p]+"; }");
 		}
-		if(p == rule.patterns.length-1) {
-			if(mode == MATCH_STRONG_CONSISTENCY) {
-				for(var pm = 0; pm < rule.patterns.length; pm++) {
+		if(transpose ? (p == 0) : (p == rule.patterns.length-1)) {
+			if(options.indexOf(MATCH_STRONG_CONSISTENCY) != -1) {
+				for(var pm = (transpose ? rule.patterns.length-1 : 0); (transpose ? pm >= 0 : pm < rule.patterns.length); (transpose ? pm-- : pm++)) {
 					body.push("if(!"+matchChecks[pm]+") { continue "+matchLabels[pm]+"; }");
 				}
 			}
@@ -3109,7 +3112,12 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 			cellMatchFns[pm] = prefix+"match_"+i+"_"+j+"_"+pm;
 			compileMatchFunction(state, cellMatchFns[pm], rule, pm);
 		}
-		functionBody = functionBody.concat(generateMatchLoops("r"+j+"_", rule, MATCH_RELAXED_CONSISTENCY, cellMatchFns, 
+		//consistency hack (MATCH_TRANSPOSE_PATTERNS) for random rule groups, 
+		// findMatches/generateTuple act as if the patterns are reversed. This fixes
+		// the inconsistency in "Threes". For regular rule groups this is not the case,
+		// but I honestly don't know why -- if this hack is used for regular groups too,
+		// then the "drop swap 3" test fails.
+		functionBody = functionBody.concat(generateMatchLoops("r"+j+"_", rule, [MATCH_RELAXED_CONSISTENCY,MATCH_TRANSPOSE_PATTERNS], cellMatchFns, 
 			function matchOccurred(_prefix, delta, indices, ks) {
 				var matchAction = [
 					"var matchIdx = currentRandomGroupMatch*"+state.randomGroupMatchStride+";",
@@ -3304,7 +3312,7 @@ function compileRule(state,rules,prefix,i,j) {
 	var functionBody = [
 		"var anyMatches = false;",
 		(rule.hasReplacements ? "var anyApplications = false;" : "")
-	].concat(generateMatchLoops("", rule, MATCH_STRONG_CONSISTENCY, cellMatchFns, 
+	].concat(generateMatchLoops("", rule, [MATCH_STRONG_CONSISTENCY], cellMatchFns, 
 		function matchOccurred(_prefix, delta, indices, ks) {
 			return [
 		  	"anyMatches = true;"
@@ -3416,19 +3424,6 @@ function compileRegularRuleGroup(state,rules,prefix,i) {
 	}
 }
 
-// This function reverses each rule's pattern order so that
-// random-group matches happen in same order as the
-//  findMatches/generateTuples pair produces. generateTuples 
-// transposes the match lists, and this achieves the same effect.
-function reverseRuleGroupPatternOrders(ruleGroup) {
-	for(var j = 0; j < ruleGroup.length; j++) {
-		ruleGroup[j].patterns.reverse();
-		ruleGroup[j].cellRowMasks.reverse();
-		ruleGroup[j].cellRowMatches.reverse();
-		ruleGroup[j].isEllipsis.reverse();
-	}
-}
-
 function compileRules(state,rules,prefix) {
 	if(rules == state.rules) {
 		state.ruleGroupFns = [];
@@ -3438,15 +3433,7 @@ function compileRules(state,rules,prefix) {
 	for(var i = 0; i < rules.length; i++) {
 		var ruleGroup = rules[i];
 		if(ruleGroup[0].isRandom) {
-			//consistency hack: for random rule groups, findMatches/generateTuple act
-			// as if the patterns are reversed. This fixes the inconsistency in "Threes".
-			// For regular rule groups this is not the case, but I honestly don't know
-			// why -- if this hack is used for regular groups too, then the "drop swap 3"
-			// test fails.
-			if(extreme_consistency) { reverseRuleGroupPatternOrders(ruleGroup); }
 			compileRandomRuleGroup(state,rules,prefix,i);
-			if(extreme_consistency) { reverseRuleGroupPatternOrders(ruleGroup); }
-			//end consistency hack
 		} else {
 			compileRegularRuleGroup(state,rules,prefix,i);
 		}

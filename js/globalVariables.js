@@ -31,8 +31,6 @@ var keybuffer = [];
 
 // Whether to run both old and new code to check small-step equivalence
 var bisimulate = false;
-// Whether to aim for the behavior most consistent with the reference implementation, even down to hacks
-var extreme_consistency = true;
 
 var messageselected=false;
 

@@ -40,7 +40,7 @@ function dumpTestCase() {
 
 	var resultarray = [levelDat,input,outputDat,curlevel,loadedLevelSeed];
 	var resultstring = JSON.stringify(resultarray);
-	consolePrint("<br><br><br>"+resultstring+"<br><br><br>",true);
+	safeConsolePrint("<br><br><br>"+resultstring+"<br><br><br>",true);
 }
 
 function clearInputHistory() {

@@ -2178,7 +2178,7 @@ function applyRules(rules, loopPoint, startRuleGroupindex, bannedGroup){
 					   	logErrorCacheable("got caught in an endless startloop...endloop vortex, escaping!", ruleGroup[0].lineNumber,true);
 					   	break;
 					}
-		        } 
+		        }
         	}
         }
     }
@@ -2201,7 +2201,7 @@ function resolveMovements(dir){
 		var movementMask = level.getMovements(i);
 		if (!movementMask.iszero()) {
 			var rigidMovementAppliedMask = level.rigidMovementAppliedMask[i];
-			if (rigidMovementAppliedMask !== 0) {
+			if(!rigidMovementAppliedMask.iszero()) {
 				//this cell participated in rigidbody movement
 				movementMask.iand(rigidMovementAppliedMask);
 				//unconsumed movement from rigidMovementAppliedMask is left over
@@ -2563,7 +2563,6 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	
 	return anyChanges;
 }
-
 function runAllRules(dir,bak) {
 	var i=0;
 	for(var j = 0; j < level.bannedGroup.length; j++) {
@@ -2581,17 +2580,54 @@ function runAllRules(dir,bak) {
 
 	calculateRowColMasks();
 
-	var rigidloop=false;
-	var startRuleGroupIndex=0;
-	do {
+	var rigidloop = true;
+	for(var loopcount = 0; loopcount < 50 && rigidloop; loopcount++) {
 	//not particularly elegant, but it'll do for now - should copy the world state and check
 	//after each iteration
 		rigidloop=false;
-		i++;
 	
 		if (verbose_logging){safeConsolePrint('applying rules');}
-
-		applyRules(state.rules, state.loopPoint, startRuleGroupIndex, level.bannedGroup);
+		
+		if(bisimulate) {
+			var beforeObjs = new Int32Array(level.objects);
+			var beforeMovs = new Int32Array(level.movements);
+			console.log("newtype");
+		}
+		applyRules_(state.rules, level.bannedGroup);
+		if(bisimulate) {
+			var wrong = false;
+			var testObjs = new Int32Array(level.objects);
+			var testMovs = new Int32Array(level.movements);
+			level.objects = new Int32Array(beforeObjs);
+			level.movements = new Int32Array(beforeMovs);
+			console.log("oldtype");
+			applyRules(state.rules, state.loopPoint, 0, level.bannedGroup);
+			for(var i = 0; i < level.objects.length; i++) {
+				if(level.objects[i] != testObjs[i]) {
+					console.log("inconsistent obj at "+i+": "+level.objects[i]+" vs "+testObjs[i]);
+					wrong = true;
+				}
+			}
+			for(var i = 0; i < level.movements.length; i++) {
+				if(level.movements[i] != testMovs[i]) {
+					console.log("inconsistent mov at "+i+": "+level.movements[i]+" vs "+testMovs[i]);
+					wrong = true;
+				}
+			}
+			if(wrong) {
+				level.objects = new Int32Array(beforeObjs);
+				level.movements = new Int32Array(beforeMovs);
+				console.log("newtype2");
+				applyRules_(state.rules, level.bannedGroup);
+				level.objects = new Int32Array(beforeObjs);
+				level.movements = new Int32Array(beforeMovs);
+				console.log("oldtype2");
+				applyRules(state.rules, state.loopPoint, 0, level.bannedGroup);
+				dumpTestCase();
+				throw new Error("inconsistent");
+			}
+		}
+		
 		
 		var shouldUndo = resolveMovements();
 		if (shouldUndo) {
@@ -2600,17 +2636,15 @@ function runAllRules(dir,bak) {
 			if(dir >= 0) { 
 				startMovement(dir,playerPositions);
 			}
-			startRuleGroupIndex=0;
 		}
-	} while (i < 50 && rigidloop);
+	}
 		
-	if (i>=50) {
+	if(loopcount>=50) {
 		safeConsolePrint("looped through 50 times, gave up.	 too many loops!");
 	}
 	
 	if (verbose_logging){safeConsolePrint('applying late rules');}
-	applyRules(state.lateRules, state.lateLoopPoint, 0);
-	startRuleGroupIndex=0;	
+	late_applyRules_(state.lateRules);
 }
 
 function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {

@@ -138,9 +138,8 @@ function RNG(seed) {
 /**
  * @return {number} Uniform random number between 0 and 255.
  */
-/* //#IF DEBUG_EXTREME
+//for extreme debug mode
 var rcount = 0;
-*/ //#ENDIF
 RNG.prototype.nextByte = function() {
 		/* //#IF DEBUG_EXTREME
 		console.log("RCOUNT:"+rcount);

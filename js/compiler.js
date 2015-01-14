@@ -12,12 +12,12 @@ if(typeof forceRegenImages != "undefined") {
 if(typeof consolePrint != "undefined") {
 	safeConsolePrint = consolePrint;
 } else {
-	safeConsolePrint = function(_) { };
+	safeConsolePrint = function(p) { /*console.log(p);*/ };
 }
 if(typeof consoleError != "undefined") {
 	safeConsoleError = consoleError;
 } else {
-	safeConsoleError = function(_) { };
+	safeConsoleError = function(p) { /*console.error(p);*/ };
 }
 if(typeof consoleCacheDump != "undefined") {
 	safeConsoleCacheDump = consoleCacheDump;
@@ -3232,6 +3232,7 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 	var applyGroupName = prefix+"_applyRandomRuleGroup_"+i;
 	evalCode("function "+applyGroupName+"(ruleGroup) {\n"+functionBody.join("\n")+"\n}");
 	var applyFn = bisimulate ? createBisimulateGroupFn(applyRandomRuleGroup,applyGroupName) : global[applyGroupName];
+	applyFn.fnName = applyGroupName;
 	if(rules == state.rules) {
 		state.ruleGroupFns[i] = applyFn;
 	} else if(rules == state.lateRules) {
@@ -3398,17 +3399,11 @@ function compileRegularRuleGroup(state,rules,prefix,i) {
 	}
 	
 	var functionBody = [
-		"var loopPropagated=false;",
-	  "var propagated=true;",
+		"var loopPropagated = false;",
+	  "var propagated = true;",
 	  "var loopcount=0;",
-	  "while(propagated) {",
-			"loopcount++;",
-			"if (loopcount>200) ",
-			"{",
-				"logErrorCacheable('Got caught looping lots in a rule group :O',ruleGroup[0].lineNumber,true);",
-				"break;",
-			"}",
-			"propagated=false;"
+	  "for(loopcount = 0; loopcount < 200 && propagated; loopcount++) {",
+			"propagated = false;"
 	];
 	for(var j = 0; j < ruleGroup.length; j++) {
 		functionBody.push(
@@ -3416,15 +3411,18 @@ function compileRegularRuleGroup(state,rules,prefix,i) {
 		);
 	}
 	functionBody.push(
-			"if (propagated) {",
-				"loopPropagated=true;",
-			"}",
+			"loopPropagated = loopPropagated || propagated;",
+		"}",
+		"if(loopcount>=200) ",
+		"{",
+			"logErrorCacheable('Got caught looping lots in a rule group :O',"+ruleGroup[0].lineNumber+",true);",
 		"}",
 		"return loopPropagated;"
 	);
 	var applyGroupName = prefix+"_applyRuleGroup_"+i;
 	evalCode("function "+applyGroupName+"(ruleGroup) {\n"+functionBody.join("\n")+"\n}");	
 	var applyFn = bisimulate ? createBisimulateGroupFn(applyRuleGroup,applyGroupName) : global[applyGroupName];
+	applyFn.fnName = applyGroupName;
 	if(rules == state.rules) {
 		state.ruleGroupFns[i] = applyFn;
 	} else if(rules == state.lateRules) {
@@ -3433,11 +3431,16 @@ function compileRegularRuleGroup(state,rules,prefix,i) {
 }
 
 function compileRules(state,rules,prefix) {
-	if(rules == state.rules) {
-		state.ruleGroupFns = [];
-	} else if(rules == state.lateRules) {
+	var late = rules == state.lateRules;
+	var loopPoints;
+	if(late) {
 		state.lateRuleGroupFns = [];
+		loopPoints = state.lateLoopPoint;
+	} else {
+		state.ruleGroupFns = [];
+		loopPoints = state.loopPoint;
 	}
+	var loopRanges = [];
 	for(var i = 0; i < rules.length; i++) {
 		var ruleGroup = rules[i];
 		if(ruleGroup[0].isRandom) {
@@ -3446,6 +3449,65 @@ function compileRules(state,rules,prefix) {
 			compileRegularRuleGroup(state,rules,prefix,i);
 		}
 	}
+	for(var i = 0; i < rules.length+1; i++) {
+		if(loopPoints[i] !== undefined) {
+			loopRanges.push([loopPoints[i],i]);
+		}
+	}
+	var fns = late ? state.lateRuleGroupFns : state.ruleGroupFns;
+	var functionBody = [];
+	functionBody.push(
+		"var anyApplied = false;",
+	  "var loopPropagated = true;",
+	  "var loopCount = 0;"
+	);
+	var curLoop = 0;
+	var inLoop = false;
+	for(var i = 0; i < fns.length; i++) {
+		var fnName = fns[i].fnName;
+		if(!fnName) { throw new Error("Missing fn "+i); }
+		var group = rules[i];
+		if(curLoop < loopRanges.length && loopRanges[curLoop][0] == i) {
+			functionBody.push(
+				"loopPropagated = true;",
+				"for(loopCount = 0; loopCount < 200 && loopPropagated; loopCount++) {",
+				" loopPropagated = false;"
+			);
+			inLoop = true;
+		}
+		if(!late && state.rigidGroups[i]) {
+			functionBody.push(
+				"if(!bannedGroup["+i+"]) {"
+			);
+		}
+		if(inLoop) {
+			functionBody.push(
+				"loopPropagated = "+fnName+"(rules["+i+"]) || loopPropagated;",
+				"anyApplied = anyApplied || loopPropagated;"
+			);
+		} else {
+			functionBody.push("anyApplied = "+fnName+"() || anyApplied;");
+		}
+		if(!late && state.rigidGroups[i]) {
+			functionBody.push("}");
+		}
+		if(curLoop < loopRanges.length && (loopRanges[curLoop][1] == i || (loopRanges[curLoop][1] == rules.length && i == rules.length-1))) {
+			functionBody.push(
+				" }",
+				"if(loopCount >= 200) {",
+				" loopPropagated = false;",
+				" logErrorCacheable('got caught in an endless startloop...endloop vortex, escaping!', "+group[0].lineNumber+",true);",
+				"}"
+			);
+			curLoop++;
+			inLoop = false;
+		}
+	}
+	functionBody.push("return anyApplied;");
+	var applyName = prefix+"applyRules_";
+	evalCode("function "+applyName+"(rules"+(late ? "" : ", bannedGroup")+") {\n"+
+		functionBody.join("\n")+
+	"\n}");
 }
 
 function analyzeRuleGroups(state) {

@@ -1,8 +1,9 @@
 'use strict';
 
 function compileAndAnalyze(cmd, lev, seed) {
-	compile(cmd, lev, seed);
+	compile(cmd, lev, seed, {journaling:true});
 	if(typeof Analyzer != "undefined") {
+		Analyzer.maybeResetJournal();
 		Analyzer.analyze(cmd,lev,seed);
 	}
 }
@@ -159,7 +160,7 @@ var Analyzer = (function() {
 		} else {
 			consolePrint("Rules are unchanged. Skipping analysis.");
 		}
-		updateRuleCountDisplay();
+		module.updateRuleCountDisplay();
 	}
 	
 	module.dumpSpec = function dumpSpec() {
@@ -274,24 +275,53 @@ var Analyzer = (function() {
 	}
 	
 	var lineCounts = {};
-	function updateRuleCountDisplay() {
+	var lastSeenJournalTurn = -1;
+	module.maybeResetJournal = function() {
+		lastSeenJournalTurn = journal ? Math.min(lastSeenJournalTurn,journal.length-1) : 0;
+		module.updateRuleCountDisplay();
+	}
+	module.updateRuleCountDisplay = function() {
 		clearRuleCountDisplay();
-		// var rules = state.rules ? state.rules.concat(state.lateRules) : [];
-		// lineCounts = {};
-		// for(var groupi = 0; groupi < rules.length; groupi++) {
-		// 	for(var ri = 0; ri < rules[groupi].length; ri++) {
-		// 		var line = rules[groupi][ri].lineNumber-1;
-		// 		if(!lineCounts[line]) {
-		// 			lineCounts[line] = 0;
-		// 		}
-		// 		lineCounts[line] += getRuleCounts(groupi,ri);
-		// 	}
-		// }
-		// for(var l in lineCounts) {
-		// 	var marker = document.createElement("div");
-		// 	marker.innerHTML = ""+lineCounts[l];
-		// 	editor.setGutterMarker(parseInt(l), analyzerRuleCountGutter, marker);
-		// }
+		if(!journal.length) { return; }
+		while(lastSeenJournalTurn < journal.length-1) {
+			lastSeenJournalTurn++;
+			var journaledTurn = journal[lastSeenJournalTurn];
+			updateRuleLineCounts(state.rules, journaledTurn.phases.slice(0,journaledTurn.phases.length-1));
+			updateRuleLineCounts(state.lateRules, [journaledTurn.phases[journaledTurn.phases.length-1]]);
+		}
+		for(var l in lineCounts) {
+			var marker = document.createElement("div");
+			marker.innerHTML = ""+lineCounts[l];
+			editor.setGutterMarker(parseInt(l), analyzerRuleCountGutter, marker);
+		}
+	}
+	function updateRuleLineCounts(rules, phases) {
+		for(var phasei = 0; phasei < phases.length; phasei++) {
+			for(var groupi = 0; groupi < rules.length; groupi++) {
+				for(var ri = 0; ri < rules[groupi].length; ri++) {
+					var line = rules[groupi][ri].lineNumber-1;
+					if(!lineCounts[line]) {
+						lineCounts[line] = 0;
+					}
+					lineCounts[line] += getRuleCounts(groupi,ri,phases[phasei]);
+				}
+			}
+		}
+	}
+	function getRuleCounts(groupi, ri, phase) {
+		var count = 0;
+		for(var group = 0; group < phase.groups.length; group++) {
+			var pgroup = phase.groups[group];
+			if(pgroup.group == groupi) {
+				for(var rule = 0; rule < pgroup.rules.length; rule++) {
+					var prule = pgroup.rules[rule];
+					if(prule.index == ri) {
+						count += (pgroup.isRandom ? Math.min(1,prule.matches.length) : prule.matches.length);
+					}
+				}
+			}
+		}
+		return count;
 	}
 	//
 	// function getRuleCounts(ruleGroup,ruleIndex) {

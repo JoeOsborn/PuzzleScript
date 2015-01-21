@@ -114,11 +114,18 @@ function generateExtraMembers(state,metadataOverride) {
 	journaling=false;
 	throttle_movement=false;
 	colorPalette=colorPalettes.arnecolors;
+	for(var k in metadataOverride) {
+		if(metadataOverride.hasOwnProperty(k)) {
+			var idx = state.metadata.indexOf(k);
+			if(idx >= 0) {
+				state.metadata[idx+1] = metadataOverride[k];
+			} else {
+				state.metadata.push(k,metadataOverride[k]);
+			}
+		}
+	}
 	for (var i=0;i<state.metadata.length;i+=2){
 		var key = state.metadata[i];
-		if(key in metadataOverride) {
-			state.metadata[i+1] = metadataOverride[key];
-		}
 		var val = state.metadata[i+1];
 		if (key==='color_palette') {
 			if (val in colorPalettesAliases) {
@@ -152,6 +159,12 @@ function generateExtraMembers(state,metadataOverride) {
 			cache_console_messages=true;
 		} else if (key==='throttle_movement') {
 			throttle_movement=true;
+		} else if (key==='journaling') {
+			if(val !== undefined) {
+				journaling = (val && val != "false") ? true : false;
+			} else {
+				journaling = true;
+			}
 		}
 	}
 
@@ -3148,7 +3161,7 @@ function journalMatchCall(state, rule, indices, ks) {
 	var patternRecords = [];
 	for(var p = 0; p < rule.patterns.length; p++) {
 		var calls = getObjectsAndMovementsCall(rule.direction, rule.patterns[p], indices[p], ks[p]);
-		patternRecords.push("{idx:"+indices[p]+", k:"+ks[p]+", objects:"+calls.objects+", movements:"+calls.movements+", replacementObjects:[], replacementMovements:[]}");
+		patternRecords.push("{idx:"+indices[p]+", k:"+ks[p]+", objects:"+calls.objects+", movements:"+calls.movements+"}");
 	}
 	return "journalNextMatch(["+patternRecords.join(",")+"], "+rule.hasReplacements+");";
 }
@@ -3264,6 +3277,12 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 						[]
 					);
 		    }))
+			).concat(journaling && rule.commands.length == 0 ?
+				["if(!result) {",
+				 "  journalRemoveLastMatch();",
+				 "}"
+				] :
+				[]
 			).concat(verbose_logging ?
 				[
 					"if(result) {",
@@ -3422,6 +3441,7 @@ function compileRule(state,rules,prefix,i,j) {
 						journaling ? journalReplaceCall(state,rule,pm,indices[pm],ks[pm]) : ""
 		    	]);
 		    }))).concat([
+					journaling && rule.commands.length == 0 ? "if(!result) {\njournalRemoveLastMatch();\n}" : "",
 					"anyApplications = result || anyApplications;"
 				]) :
 				[]

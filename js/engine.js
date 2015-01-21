@@ -2941,6 +2941,15 @@ function journalNextMatch(patterns, hasReplacements) { //add to current rule
 	}
 }
 
+function journalRemoveLastMatch() {
+	assertJournalType(["match","rule"]);
+	if(currentJournal().type == "match") {
+		journalStack.pop();
+	}
+	var rule = currentJournal();
+	rule.matches.splice(rule.matches.length-1, 1);
+}
+
 function journalNextReplacement(replacement) { //add to next un-replacemented pattern
 	assertJournalType(["match"]);
 	var match = currentJournal();
@@ -2982,8 +2991,7 @@ function journalNextRuleGroup(i,isRandom) { //add to current phase
 	journalStack.push(group);
 }
 
-function journalNextPhase(phase, i, j, dir) {
-	assertNumber(i); assertNumber(j); assertNumber(dir);
+function journalNextPhase(phase) {
 	assertJournalType(["rule","group","phase","turn"]);
 	if(currentJournal().type == "rule") {
 		journalStack.pop();

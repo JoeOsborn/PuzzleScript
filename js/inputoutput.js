@@ -667,7 +667,13 @@ function checkKey(e,justPressed) {
 
             } else {
                 pushInput(inputdir);
+                if(typeof Analyzer !== "undefined") {
+                    Analyzer.updateRuleCountDisplay();
+                }
                 if (processInput(inputdir)) {
+                    if(typeof Analyzer !== "undefined") {
+                        Analyzer.updateRuleCountDisplay();
+                    }
                     if(verbose_logging && (typeof SolverCautious != "undefined")) { 
                         consolePrint("H:"+SolverCautious.calculateH());
 												consoleCacheDump();
@@ -693,6 +699,9 @@ function update() {
     if (againing) {
         if (timer>againinterval&&messagetext.length==0) {
             if (processInput(-1)) {
+                if(typeof Analyzer !== "undefined") {
+                    Analyzer.updateRuleCountDisplay();
+                }
                 if(verbose_logging && (typeof SolverCautious != "undefined")) { 
                     consolePrint("H:"+SolverCautious.calculateH()); 
                 }
@@ -742,6 +751,9 @@ function update() {
             autotick=0;
             pushInput("tick");
             if (processInput(-1)) {
+                if(typeof Analyzer !== "undefined") {
+                    Analyzer.updateRuleCountDisplay();
+                }
                 if(verbose_logging && (typeof SolverCautious != "undefined")) { 
                     consolePrint("H:"+SolverCautious.calculateH()); 
                 }

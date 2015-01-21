@@ -3160,11 +3160,14 @@ function journalReplaceCall(state, rule, p, index, k) {
 
 function compileRandomRuleGroup(state,rules,prefix,i) {
 	var ruleGroup = rules[i];
-	var functionBody = ["currentRandomGroupMatch = 0|0;"];
+	var functionBody = [
+		journaling ? "journalNextRuleGroup("+i+",true);" : "",
+		"currentRandomGroupMatch = 0|0;"
+	];
 	for(var j = 0; j < ruleGroup.length; j++) {
 		var rule = ruleGroup[j];
 		if(journaling) {
-			functionBody.push("journalNextRule("+(state.rules == rules ? "'normal'" : "'late'")+", "+i+", "+j+", "+rule.direction+");");
+			functionBody.push("journalNextRule("+j+", "+rule.direction+");");
 		}
 		var cellMatchFns = [];
 		for(var pm = 0; pm < rule.patterns.length; pm++) {
@@ -3391,7 +3394,7 @@ function compileRule(state,rules,prefix,i,j) {
 	var functionBody = [
 		"var anyMatches = false;",
 		(rule.hasReplacements ? "var anyApplications = false;" : ""),
-		(journaling ? "journalNextRule("+(state.rules == rules ? "'normal'" : "'late'")+", "+i+", "+j+", "+rule.direction+");" : ""),
+		(journaling ? "journalNextRule("+j+", "+rule.direction+");" : ""),
 	].concat(generateMatchLoops("", rule, [MATCH_STRONG_CONSISTENCY], cellMatchFns, 
 		function matchOccurred(_prefix, delta, indices, ks) {
 			return [
@@ -3467,6 +3470,7 @@ function compileRegularRuleGroup(state,rules,prefix,i) {
 	}
 	
 	var functionBody = [
+		(journaling ? "journalNextRuleGroup("+i+",false);" : ""),
 		"var loopPropagated = false;",
 	  "var propagated = true;",
 	  "var loopcount=0;",
@@ -3525,6 +3529,7 @@ function compileRules(state,rules,prefix) {
 	var fns = late ? state.lateRuleGroupFns : state.ruleGroupFns;
 	var functionBody = [];
 	functionBody.push(
+		(journaling ? "journalNextPhase("+(late ? "'late'" : "'normal'")+");" : ""),
 		"var anyApplied = false;",
 	  "var loopPropagated = true;",
 	  "var loopCount = 0;"
@@ -3642,7 +3647,7 @@ function compilePrelude(state) {
 		);
 		preludeBody.push(
 			"journal = [];", 
-			"journalStack = [{type:'group', rules:[]}];"
+			"journalStack = [];"
 		);
 	}
 	evalCode(

@@ -2446,7 +2446,6 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	againing = false;
 	
 	if(inputDir > 4) { return; }
-	
 	if (verbose_logging) { 
 		if (inputDir===-1) {
 			safeConsolePrint('Turn starts with no input.')
@@ -2576,6 +2575,9 @@ function processInput(inputDir,dontCheckWin,dontModify,premadeBackup,dontCancelO
 	return anyChanges;
 }
 function runAllRules(dir,bak) {
+	if(journaling) {
+		journalNextTurn(dir);
+	}
 	var i=0;
 	for(var j = 0; j < level.bannedGroup.length; j++) {
 		level.bannedGroup[j] = false;
@@ -2640,7 +2642,9 @@ function runAllRules(dir,bak) {
 			}
 		}
 		
-		
+		// if(journaling) {
+		// 	journalResolveMovements();
+		// }
 		var shouldUndo = resolveMovements();
 		if (shouldUndo) {
 			rigidloop=true;
@@ -2923,8 +2927,9 @@ function assertJournalType(types) {
 	return true;
 }
 
-function currentJournal() {
-	return journalStack[journalStack.length-1];
+function currentJournal(offset) {
+	if(offset === undefined) { offset = 0; }
+	return journalStack[journalStack.length-(1+offset)];
 }
 
 function journalNextMatch(patterns, hasReplacements) { //add to current rule
@@ -2946,19 +2951,73 @@ function journalNextReplacement(replacement) { //add to next un-replacemented pa
 	}
 }
 
-//TODO: remove phase & i (*j?) from rule structure
-function journalNextRule(phase, i, j, dir) { //add to current rule group (for now, top level)
-	//TODO: prevent putting rule of group 2 into group 1's contents!
+function assertNumber(i) {
+	if(typeof(i) != "number") {
+		throw new Error("Not a number:"+i);
+	}
+}
+
+function journalNextRule(j, dir) { //add to current rule group
+	assertNumber(j); assertNumber(dir);
 	assertJournalType(["rule","group"]);
 	if(currentJournal().type == "rule") {
 		journalStack.pop();
 	}
-	var rule = {type:"rule", phase:phase, group:i, index:j, direction:dir, matches:[]};
-	//TODO: currentJournal().rules.push(rule);
-	//FIXME: for now:
-		//add to top level
-		currentJournal().rules.push(rule);
+	var rule = {type:"rule", index:j, direction:dir, matches:[]};
+	currentJournal().rules.push(rule);
 	journalStack.push(rule);
+}
+
+function journalNextRuleGroup(i,isRandom) { //add to current phase
+	assertNumber(i);
+	assertJournalType(["rule","group","phase"]);
+	if(currentJournal().type == "rule") {
+		journalStack.pop();
+	}
+	if(currentJournal().type == "group") {
+		journalStack.pop();
+	}
+	var group = {type:"group", group:i, isRandom:isRandom, rules:[]};
+	currentJournal().groups.push(group);
+	journalStack.push(group);
+}
+
+function journalNextPhase(phase, i, j, dir) {
+	assertNumber(i); assertNumber(j); assertNumber(dir);
+	assertJournalType(["rule","group","phase","turn"]);
+	if(currentJournal().type == "rule") {
+		journalStack.pop();
+	}
+	if(currentJournal().type == "group") {
+		journalStack.pop();
+	}
+	if(currentJournal().type == "phase") {
+		journalStack.pop();
+	}
+	var phase = {type:"phase", phase:phase, groups:[]};
+	currentJournal().phases.push(phase);
+	journalStack.push(phase);
+}
+
+function journalNextTurn(dir) {
+	if(journalStack.length) {
+		assertJournalType(["rule","group","phase","turn"]);
+		if(currentJournal().type == "rule") {
+			journalStack.pop();
+		}
+		if(currentJournal().type == "group") {
+			journalStack.pop();
+		}
+		if(currentJournal().type == "phase") {
+			journalStack.pop();
+		}
+		if(currentJournal().type == "turn") {
+			journalStack.pop();
+		}
+	}
+	var turn = {type:"turn", input:dir, phases:[]};
+	journal.push(turn);
+	journalStack.push(turn);
 }
 
 function journalNextRandomGroupSelected(selMatch,selRule) { 
@@ -2969,8 +3028,10 @@ function journalNextRandomGroupSelected(selMatch,selRule) {
 function replacementDescription() {
 	assertJournalType(["rule"]);
 	var rule = currentJournal();
+	var group = currentJournal(1);
+	var phase = currentJournal(2);
 	var dir = rule.direction;
-	var ruleData = (rule.phase == "normal" ? state.rules : state.lateRules)[rule.group][rule.index];
+	var ruleData = (phase.phase == "normal" ? state.rules : state.lateRules)[group.group][rule.index];
 	var match = rule.matches[rule.matches.length-1];
 	var lhs = [dirMaskName[dir]];
 	var rhs = [];

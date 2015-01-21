@@ -25,7 +25,7 @@ var safeConsolePrint, safeConsoleError;
 if(typeof consolePrint != "undefined") {
 	safeConsolePrint = consolePrint;
 } else {
-	safeConsolePrint = function(_) { };
+	safeConsolePrint = function(_,_,_) { };
 }
 if(typeof consoleError != "undefined") {
 	safeConsoleError = consoleError;

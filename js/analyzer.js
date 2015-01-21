@@ -10,6 +10,8 @@ function compileAndAnalyze(cmd, lev, seed) {
 var Analyzer = (function() {
 	var module = {};
 	
+	module.SKIP_SOLVING = true;
+	
 	module.MODE_NORMAL = "MODE_NORMAL";
 	module.MODE_MEM_TEST = "MODE_MEM_TEST";
 	
@@ -54,13 +56,16 @@ var Analyzer = (function() {
 		return getRuleCountMode();
 	}
 	var RC_MODE_INTERACTIVE = "rc-interactive";
+	var RC_MODE_LAST_TURN = "rc-last-turn";
 	var RC_MODE_THIS_LEVEL_WIN = "rc-this-level-win";
 	var RC_MODE_ALL_LEVELS_WIN = "rc-all-levels-win";
 	var RC_CATEGORY_WIN = Utilities.RC_CATEGORY_WIN;
 	var RC_CATEGORY_INTERACTIVE = Utilities.RC_CATEGORY_INTERACTIVE;
+	var RC_CATEGORY_LAST_TURN = Utilities.RC_CATEGORY_LAST_TURN;
 	var storedRuleCounts = [];
 	var ruleCountModes = [
 		RC_MODE_INTERACTIVE,
+		RC_MODE_LAST_TURN,
 		RC_MODE_THIS_LEVEL_WIN,
 		RC_MODE_ALL_LEVELS_WIN
 	];
@@ -83,7 +88,7 @@ var Analyzer = (function() {
 		"memorytest": "js/analyzer/worker_memorytest.js"
 	};
 	
-	registerApplyAtWatcher(ruleApplied);
+	// registerApplyAtWatcher(ruleApplied);
 	consolePrint("The right-hand gutter is now showing counts of rules triggered by interactive play.");
 	
 	module.clear = function clear() {
@@ -104,6 +109,7 @@ var Analyzer = (function() {
 
 	//Launch a web worker to do analysis without blocking the UI.
 	module.analyze = function analyze(command,text,randomseed) {
+		if(module.SKIP_SOLVING) { return; }
 		//by this time, compile has already been called.
 		if(errorCount > 0) {
 			consolePrint("Analysis cancelled due to errors.");
@@ -270,63 +276,42 @@ var Analyzer = (function() {
 	var lineCounts = {};
 	function updateRuleCountDisplay() {
 		clearRuleCountDisplay();
-		var rules = state.rules ? state.rules.concat(state.lateRules) : [];
-		lineCounts = {};
-		for(var groupi = 0; groupi < rules.length; groupi++) {
-			for(var ri = 0; ri < rules[groupi].length; ri++) {
-				var line = rules[groupi][ri].lineNumber-1;
-				if(!lineCounts[line]) {
-					lineCounts[line] = 0;
-				}
-				lineCounts[line] += getRuleCounts(groupi,ri);
-			}
-		}
-		for(var l in lineCounts) {
-			var marker = document.createElement("div");
-			marker.innerHTML = ""+lineCounts[l];
-			editor.setGutterMarker(parseInt(l), analyzerRuleCountGutter, marker);
-		}
+		// var rules = state.rules ? state.rules.concat(state.lateRules) : [];
+		// lineCounts = {};
+		// for(var groupi = 0; groupi < rules.length; groupi++) {
+		// 	for(var ri = 0; ri < rules[groupi].length; ri++) {
+		// 		var line = rules[groupi][ri].lineNumber-1;
+		// 		if(!lineCounts[line]) {
+		// 			lineCounts[line] = 0;
+		// 		}
+		// 		lineCounts[line] += getRuleCounts(groupi,ri);
+		// 	}
+		// }
+		// for(var l in lineCounts) {
+		// 	var marker = document.createElement("div");
+		// 	marker.innerHTML = ""+lineCounts[l];
+		// 	editor.setGutterMarker(parseInt(l), analyzerRuleCountGutter, marker);
+		// }
 	}
-		
-	function ruleApplied(normalOrLate,ruleGroup,ruleIndex,direction,tuple) {
-		if(module.mode != module.MODE_NORMAL) { return; }
-		var rule = (normalOrLate == "normal" ? state.rules[ruleGroup][ruleIndex] : state.lateRules[ruleGroup][ruleIndex]);
-		Utilities.incrementRuleCount(storedRuleCounts,curlevel,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
-		if(getRuleCountMode() == RC_MODE_INTERACTIVE) {
-			var l = rule.lineNumber-1;
-			if(!lineCounts[l]) {
-				lineCounts[l] = 1;
-				var marker = document.createElement("div");
-				marker.innerHTML = "1";
-				editor.setGutterMarker(l, analyzerRuleCountGutter, marker);
-			} else {
-				lineCounts[l]++;
-				var existingMarkers = editor.lineInfo(l).gutterMarkers;
-				if(existingMarkers && existingMarkers[analyzerRuleCountGutter]) {
-					existingMarkers[analyzerRuleCountGutter].innerHTML = ""+lineCounts[l];
-				}
-			}
-		}
-	}
-	
-	function getRuleCounts(ruleGroup,ruleIndex) {
-		var count = 0;
-		switch(getRuleCountMode()) {
-			case RC_MODE_ALL_LEVELS_WIN:
-				for(var l = 0; l < state.levels.length; l++) {
-					count += Utilities.getEntry(storedRuleCounts,l,RC_CATEGORY_WIN,ruleGroup,ruleIndex);
-				}
-				return count;
-			case RC_MODE_THIS_LEVEL_WIN:
-				count += Utilities.getEntry(storedRuleCounts,curlevel,RC_CATEGORY_WIN,ruleGroup,ruleIndex);
-				return count;
-			case RC_MODE_INTERACTIVE:
-				for(var l = 0; l < state.levels.length; l++) {
-					count += Utilities.getEntry(storedRuleCounts,l,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
-				}
-				return count;
-		}
-	}
+	//
+	// function getRuleCounts(ruleGroup,ruleIndex) {
+	// 	var count = 0;
+	// 	switch(getRuleCountMode()) {
+	// 		case RC_MODE_ALL_LEVELS_WIN:
+	// 			for(var l = 0; l < state.levels.length; l++) {
+	// 				count += Utilities.getEntry(storedRuleCounts,l,RC_CATEGORY_WIN,ruleGroup,ruleIndex);
+	// 			}
+	// 			return count;
+	// 		case RC_MODE_THIS_LEVEL_WIN:
+	// 			count += Utilities.getEntry(storedRuleCounts,curlevel,RC_CATEGORY_WIN,ruleGroup,ruleIndex);
+	// 			return count;
+	// 		case RC_MODE_INTERACTIVE:
+	// 			for(var l = 0; l < state.levels.length; l++) {
+	// 				count += Utilities.getEntry(storedRuleCounts,l,RC_CATEGORY_INTERACTIVE,ruleGroup,ruleIndex);
+	// 			}
+	// 			return count;
+	// 	}
+	// }
 	
 	module.onEditorGutterClick = function onEditorGutterClick(cm, n) {
 		clearRuleCountDisplay();
@@ -334,8 +319,9 @@ var Analyzer = (function() {
 		updateRuleCountDisplay();
 		consolePrint("The right-hand gutter is now showing counts of rules triggered by "+
 		 (mode == RC_MODE_INTERACTIVE ? "interactive play" :
+		  (mode == RC_MODE_LAST_TURN ? "the last turn (including again-turns)" : 
 		  (mode == RC_MODE_THIS_LEVEL_WIN ? "the winning moves of the current level" : 
-		  (mode == RC_MODE_ALL_LEVELS_WIN ? "the winning moves of all levels" : "<<undef>>")))+".");
+		  (mode == RC_MODE_ALL_LEVELS_WIN ? "the winning moves of all levels" : "<<undef>>"))))+".");
 	};
 	
 	function clearLineHighlights() {

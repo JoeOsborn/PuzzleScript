@@ -17,7 +17,7 @@ function runTest(dataarray) {
 	if (targetlevel===undefined) {
 		targetlevel=0;
 	}
-	compile(["loadLevel",targetlevel],levelString,randomseed);
+	compile(["loadLevel",targetlevel],levelString,randomseed,{verbose_logging:0});
 
 	while (againing) {
 		againing=false;

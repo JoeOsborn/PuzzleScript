@@ -12,7 +12,8 @@ try {
 } catch(ex) {
 }
 
-var verbose_logging=false;
+var verbose_logging=0;
+var journaling=false;
 var throttle_movement=false;
 var cache_console_messages=false;
 var quittingTitleScreen=false;

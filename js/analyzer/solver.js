@@ -30,7 +30,7 @@ var Solver = (function() {
 			module.REPLY_FN = reply;
 		}
 		module.START_TIME = module.now();
-		compile(["loadLevel", Solver.LEVEL], Solver.RULES, Solver.SEED);
+		compile(["loadLevel", Solver.LEVEL], Solver.RULES, Solver.SEED, {verbose_logging:false});
 		
 		module.INIT_LEVEL = backupLevel();
 		
@@ -77,29 +77,22 @@ var Solver = (function() {
 		return response.response;
 	};
 
-	var storedRuleCounts;
-	var storedRuleCategory = Utilities.RC_CATEGORY_WIN;
-	
-	function ruleApplied(normalOrLate,ruleGroup,ruleIndex,direction) {
-		Utilities.incrementRuleCount(storedRuleCounts,module.LEVEL,storedRuleCategory,ruleGroup,ruleIndex);
-	};
-
 	var AGAIN_LIMIT = 100;
 	module.getRuleCounts = function(prefix) {
 		var retval = [];
 		//alias storedRuleCounts to our return value
-		storedRuleCounts = retval;
-		registerApplyAtWatcher(ruleApplied);
+		// storedRuleCounts = retval;
+		// registerApplyAtWatcher(ruleApplied);
 		//go to initial state
-		restartTarget = module.INIT_LEVEL;
-		winning=false;
-		restoreLevel(module.INIT_LEVEL);
-		//run prefix
-		for(var i = 0; i < prefix.length; i++) {
-			runCompleteStep(prefix[i]);
-		}
-		unregisterApplyAtWatcher(ruleApplied);
-		storedRuleCounts = null;
+		// restartTarget = module.INIT_LEVEL;
+		// winning=false;
+		// restoreLevel(module.INIT_LEVEL);
+		// //run prefix
+		// for(var i = 0; i < prefix.length; i++) {
+		// 	runCompleteStep(prefix[i]);
+		// }
+		// unregisterApplyAtWatcher(ruleApplied);
+		// storedRuleCounts = null;
 		return retval;
 	}
 

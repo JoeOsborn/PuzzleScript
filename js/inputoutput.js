@@ -669,7 +669,8 @@ function checkKey(e,justPressed) {
                 pushInput(inputdir);
                 if (processInput(inputdir)) {
                     if(verbose_logging && (typeof SolverCautious != "undefined")) { 
-                        consolePrint("H:"+SolverCautious.calculateH()); 
+                        consolePrint("H:"+SolverCautious.calculateH());
+												consoleCacheDump();
                     }
                     redraw();
                 }

@@ -173,7 +173,7 @@ if(typeof forceRegenImages != "undefined") {
 if(typeof consolePrint != "undefined") {
 	safeConsolePrint = consolePrint;
 } else {
-	safeConsolePrint = function(_) { };
+	safeConsolePrint = function(_,_,_) { };
 }
 if(typeof consoleError != "undefined") {
 	safeConsoleError = consoleError;
@@ -437,6 +437,7 @@ function loadLevelFromState(state,levelindex,randomseed) {
 		}
     }
     loadLevelFromLevelDat(state,leveldat,randomseed);
+		//TODO: per level prelude
 }
 
 var sprites = [
@@ -645,12 +646,12 @@ Rule.prototype.applyAt = function(delta,tuple,check) {
 			ruleDirection + ' applied.</font>';
 		safeConsolePrint(logString);
 	}
-	if(result && applyAtWatchers && applyAtWatchers.length) {
-		var ruleLoc = rule.getGroupAndRuleIndex();
-		for(var i = 0; i < applyAtWatchers.length; i++) {
-			applyAtWatchers[i]("normal",ruleLoc.groupIndex,ruleLoc.ruleIndex,ruleDirection);
-		}
-	}
+	// if(result && applyAtWatchers && applyAtWatchers.length) {
+	// 	var ruleLoc = rule.getGroupAndRuleIndex();
+	// 	for(var i = 0; i < applyAtWatchers.length; i++) {
+	// 		applyAtWatchers[i]("normal",ruleLoc.groupIndex,ruleLoc.ruleIndex,ruleDirection);
+	// 	}
+	// }
 
     return result;
 };
@@ -1066,6 +1067,17 @@ var dirMaskName = {
      15:'?' ,
      16:'action',
      3:'no'
+};
+
+var dirMaskKW = {
+     0:'\u2022',		
+     1:'^',
+     2:'v'  ,
+     4:'<'  , 
+     8:'>',  
+     15:'?' ,
+     16:'!',
+     3:'X'
 };
 
 var seedsToPlay_CanMove=[];
@@ -2703,7 +2715,7 @@ function handleCommands(dir, modified, shortcutAgain, skipCheckpoint) {
 			} else {
 				var old_verbose_logging=verbose_logging;
 				var oldmessagetext = messagetext;
-				verbose_logging=false;
+				verbose_logging=0;
 				if(processInput(-1,true,true,null,false,false)) {
 					verbose_logging=old_verbose_logging;
       	
@@ -2878,17 +2890,158 @@ function goToTitleScreen(){
 	generateTitleScreen();
 }
 
-var applyAtWatchers = [];
 
-function registerApplyAtWatcher(fn) {
-	if(applyAtWatchers.indexOf(fn) == -1) {
-		applyAtWatchers.push(fn);
+
+function range(min,max) {
+	var ret = [];
+	for(var i = min; i < max; i++) {
+		ret.push(i);
+	}
+	return ret;
+}
+
+function cellIndices(delta, count, idx, ellipsisIdx, k) {
+	var ret = [];
+	for(var c = 0; c < count; c++) {
+		if(c == ellipsisIdx) {
+			for(var ki = 0; ki < k; ki++) {
+				ret.push(idx);
+				idx += delta;
+			}
+			continue;
+		}
+		ret.push(idx);
+		idx += delta;
+	}
+	return ret;
+}
+
+function assertJournalType(types) {
+	if(types.indexOf(currentJournal().type) == -1) { 
+		throw new Error("Invalid context "+currentJournal()); 
+	}
+	return true;
+}
+
+function currentJournal() {
+	return journalStack[journalStack.length-1];
+}
+
+function journalNextMatch(patterns, hasReplacements) { //add to current rule
+	assertJournalType(["rule"]);
+	var match = {type:"match", patterns:patterns, replacements:hasReplacements ? [] : null};
+	currentJournal().matches.push(match);
+	if(hasReplacements) {
+		journalStack.push(match);
 	}
 }
 
-function unregisterApplyAtWatcher(fn) {
-	var idx = applyAtWatchers.indexOf(fn);
-	if(idx != -1) {
-		applyAtWatchers.splice(idx,1);
+function journalNextReplacement(replacement) { //add to next un-replacemented pattern
+	assertJournalType(["match"]);
+	var match = currentJournal();
+	match.replacements.push(replacement);
+	//pop out if we're done
+	if(match.patterns.length == match.replacements.length) {
+		journalStack.pop();
 	}
+}
+
+//TODO: remove phase & i (*j?) from rule structure
+function journalNextRule(phase, i, j, dir) { //add to current rule group (for now, top level)
+	//TODO: prevent putting rule of group 2 into group 1's contents!
+	assertJournalType(["rule","group"]);
+	if(currentJournal().type == "rule") {
+		journalStack.pop();
+	}
+	var rule = {type:"rule", phase:phase, group:i, index:j, direction:dir, matches:[]};
+	//TODO: currentJournal().rules.push(rule);
+	//FIXME: for now:
+		//add to top level
+		currentJournal().rules.push(rule);
+	journalStack.push(rule);
+}
+
+function journalNextRandomGroupSelected(selMatch,selRule) { 
+	//TODO: add to rule group info
+	//FIXME: nop
+}
+
+function replacementDescription() {
+	assertJournalType(["rule"]);
+	var rule = currentJournal();
+	var dir = rule.direction;
+	var ruleData = (rule.phase == "normal" ? state.rules : state.lateRules)[rule.group][rule.index];
+	var match = rule.matches[rule.matches.length-1];
+	var lhs = [dirMaskName[dir]];
+	var rhs = [];
+	for(var p = 0; p < match.patterns.length; p++) {
+		var oldCellContents = match.patterns[p];
+		var idx = oldCellContents.idx;
+		var x = (idx / level.height) | 0;
+		var y = (idx - x*level.height) | 0;
+		var k = oldCellContents.k;
+		lhs.push("at "+idx+"("+x+","+y+")"+(k >= 0 ? " ..."+k : ""));
+		var oldObjs = oldCellContents.objects;
+		var oldMovs = oldCellContents.movements;
+		var cellPattern = ruleData.patterns[p];
+		var newCellContents = match.replacements ? match.replacements[p] : null;
+		var lhsPattern = [], rhsPattern = [];
+		for(var ci = 0; ci < cellPattern.length; ci++) {
+			//only print out the ones that overlap the rule's (any) objects present/missing
+			var oldObjsBV = new BitVec(oldObjs[ci]);
+			var oldMovsBV = new BitVec(oldMovs[ci]);
+			var inObjectMask = cellPattern[ci].objectsPresent.clone();
+			inObjectMask.iand(oldObjsBV);
+			var outObjectMask = cellPattern[ci].objectsMissing.clone();
+			outObjectMask.iclear(oldObjsBV);
+			var patternString = "";
+			var anyBV = new BitVec(STRIDE_OBJ);
+			for(var o = 0; o < 32*STRIDE_OBJ; o++) {
+				//.... get object by id o
+				var objName = state.idDict[o];
+				var object = state.objects[objName];
+				if(inObjectMask.get(o) || cellPattern[ci].anyObjectsPresent.some(function(anyObj) { 
+					return anyObj.get(o) && oldObjsBV.get(o);
+				})) {
+					//get move desc
+					var moveDesc = dirMaskKW[oldMovsBV.getshiftor(0x1f, 5*object.layer)];
+					if(patternString.length) { patternString += " "; }
+					patternString += moveDesc+" "+objName;
+				}
+				// if(outObjectMask.get(o)) {
+				// 	if(patternString.length) { patternString += " "; }
+				// 	patternString += "no "+objName;
+				// }
+			}
+			lhsPattern.push(patternString);
+			
+			if(newCellContents) {
+				var newObjs = newCellContents.objects[ci];
+				var newMovs = newCellContents.movements[ci];
+				var newObjsBV = new BitVec(newObjs);
+				var newMovsBV = new BitVec(newMovs);
+				var newObjectMask = cellPattern[ci].replacement.objectsSet.clone();
+				newObjectMask.ior(cellPattern[ci].replacement.randomEntityMask);
+				newObjectMask.iand(newObjsBV);
+				
+				var patternString = "";
+				for(var o = 0; o < 32*STRIDE_OBJ; o++) {
+					if(newObjectMask.get(o)) {
+						//.... get object by id o
+						var objName = state.idDict[o];
+						var object = state.objects[objName];
+						var moveDesc = dirMaskKW[newMovsBV.getshiftor(0x1f, 5*object.layer)];
+						if(patternString.length) { patternString += " "; }
+						patternString += moveDesc+" "+objName;
+					}
+				}
+				rhsPattern.push(patternString);
+			}
+		}
+		lhs.push("["+lhsPattern.join(" | ")+"]");
+		if(newCellContents) {
+			rhs.push("["+rhsPattern.join(" | ")+"]");
+		}
+	}
+	return lhs.join(" ") + (rhs ? " -> "+rhs.join(" ") : "");	
 }

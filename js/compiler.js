@@ -68,7 +68,7 @@ function generateSpriteMatrix(dat) {
 var debugMode;
 var colorPalette;
 
-function generateExtraMembers(state) {
+function generateExtraMembers(state,metadataOverride) {
 
 	if (state.collisionLayers.length===0) {
 		logError("No collision layers defined.  All objects need to be in collision layers.");
@@ -110,11 +110,15 @@ function generateExtraMembers(state) {
 	
 	//get colorpalette name
 	debugMode=false;
-	verbose_logging=false;
+	verbose_logging=0;
+	journaling=false;
 	throttle_movement=false;
 	colorPalette=colorPalettes.arnecolors;
 	for (var i=0;i<state.metadata.length;i+=2){
 		var key = state.metadata[i];
+		if(key in metadataOverride) {
+			state.metadata[i+1] = metadataOverride[key];
+		}
 		var val = state.metadata[i+1];
 		if (key==='color_palette') {
 			if (val in colorPalettesAliases) {
@@ -129,7 +133,22 @@ function generateExtraMembers(state) {
 			debugMode=true;
 			cache_console_messages=true;
 		} else if (key ==='verbose_logging') {
-			verbose_logging=true;
+			if(val !== undefined) {
+				var valInt = parseInt(val);
+				if(val.toLowerCase && val.toLowerCase() == "very") {
+					val = 2;
+				} else if(isNaN(valInt) || valInt < 0) {
+					val = (val ? 1 : 0);
+				} else {
+					val = valInt;
+				}
+			} else {
+				val = 1;
+			}
+			if(val > 0) {
+				journaling = true;
+			}
+			verbose_logging=val;
 			cache_console_messages=true;
 		} else if (key==='throttle_movement') {
 			throttle_movement=true;
@@ -2514,7 +2533,7 @@ StringStream.prototype = {
 };
 
 var MAX_ERRORS=5;
-function loadFile(str) {
+function loadFile(str,metadataOverride) {
 	safeConsolePrint('loadFile');
 
 	var processor = new codeMirrorFn();
@@ -2538,7 +2557,7 @@ function loadFile(str) {
 
 	delete state.lineNumber;
 
-	generateExtraMembers(state);
+	generateExtraMembers(state,metadataOverride);
 	generateMasks(state);
 	levelsToArray(state);
 	rulesToArray(state);
@@ -2611,7 +2630,8 @@ function loadFile(str) {
 }
 
 var ifrm;
-function compile(command,text,randomseed) {
+function compile(command,text,randomseed,metadataOverride) {
+	metadataOverride = metadataOverride || {};
 	matchCache={};
 	safeForceRegenImages();
 	if (command===undefined) {
@@ -2639,7 +2659,7 @@ function compile(command,text,randomseed) {
 	safeConsolePrint('=================================');
 	try
 	{
-		var state = loadFile(text);
+		var state = loadFile(text,metadataOverride);
 //		safeConsolePrint(JSON.stringify(state));
 	} finally {
 		compiling = false;
@@ -3100,6 +3120,7 @@ function compileCellReplaceFn(state, name, rule, pm, ci) {
 		body.push("level.movements[index*STRIDE_MOV+"+idx+"] |= "+movementsSetInts[idx]+";");
 		body.push("changed = changed || (level.movements[index*STRIDE_MOV+"+idx+"] !== "+oldMovementMaskInts[idx]+");");
 	}
+		
 	body.push("return changed;");
 	evalCode(
 		"function "+name+"(index) {\n" +
@@ -3110,11 +3131,41 @@ function compileCellReplaceFn(state, name, rule, pm, ci) {
 	return name;
 }
 
+function getObjectsAndMovementsCall(dir, pattern, index, k) {
+	var objs = [];
+	var movs = [];
+	var offset = 0;
+	var delta = "("+dirMasksDelta[dir][1]+"+"+dirMasksDelta[dir][0]+"*level.height) | 0";
+	var ellipsisIdx = pattern.indexOf(ellipsisPattern);
+	return {
+		objects:"cellIndices("+delta+","+pattern.length+","+index+","+ellipsisIdx+","+k+").map(function(ci) { return range(0,STRIDE_OBJ).map(function(si){return level.objects[ci*STRIDE_OBJ+si]; })})", 
+		movements:"cellIndices("+delta+","+pattern.length+","+index+","+ellipsisIdx+","+k+").map(function(ci) { return range(0,STRIDE_MOV).map(function(si){return level.movements[ci*STRIDE_MOV+si]; })})"
+	};
+}
+
+function journalMatchCall(state, rule, indices, ks) {
+	//["+indices.join(",")+"],["+ks.join(",")+"],<<objs>>,<<movs>>);
+	var patternRecords = [];
+	for(var p = 0; p < rule.patterns.length; p++) {
+		var calls = getObjectsAndMovementsCall(rule.direction, rule.patterns[p], indices[p], ks[p]);
+		patternRecords.push("{idx:"+indices[p]+", k:"+ks[p]+", objects:"+calls.objects+", movements:"+calls.movements+", replacementObjects:[], replacementMovements:[]}");
+	}
+	return "journalNextMatch(["+patternRecords.join(",")+"], "+rule.hasReplacements+");";
+}
+
+function journalReplaceCall(state, rule, p, index, k) {
+	var calls = getObjectsAndMovementsCall(rule.direction, rule.patterns[p], index, k);
+	return "journalNextReplacement({objects:"+calls.objects+", movements:"+calls.movements+"});";
+}
+
 function compileRandomRuleGroup(state,rules,prefix,i) {
 	var ruleGroup = rules[i];
 	var functionBody = ["currentRandomGroupMatch = 0|0;"];
 	for(var j = 0; j < ruleGroup.length; j++) {
 		var rule = ruleGroup[j];
+		if(journaling) {
+			functionBody.push("journalNextRule("+(state.rules == rules ? "'normal'" : "'late'")+", "+i+", "+j+", "+rule.direction+");");
+		}
 		var cellMatchFns = [];
 		for(var pm = 0; pm < rule.patterns.length; pm++) {
 			cellMatchFns[pm] = prefix+"match_"+i+"_"+j+"_"+pm;
@@ -3137,7 +3188,10 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 						matchAction.push("randomGroupMatches[matchIdx+"+(1+pat*2+1)+"] = "+ks[pat]+";");
 					}
 				}
-			 	matchAction.push("currentRandomGroupMatch++;");
+			 	matchAction.push(
+					journaling ? journalMatchCall(state, rule, indices, ks) : "",
+					"currentRandomGroupMatch++;"
+				);
 				/* // #IF DEBUG_EXTREME
 				matchAction.push("console.log('RI:'+"+j+"+' TPL:'+JSON.stringify(randomGroupMatches.subarray(matchIdx+1,matchIdx+1+"+rule.patterns.length*2+")));");
 				*/ //#ENDIF
@@ -3152,6 +3206,7 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 		"var rn = RandomGen.uniform();",
 		"var selectedMatch = (rn*currentRandomGroupMatch)|0;",
 		"var selectedRule = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"]",
+		journaling ? "journalNextRandomGroupSelected(selectedMatch,selectedRule);" : "",
 		/* // #IF DEBUG_EXTREME
 		"console.log('A rule group "+i+" selected '+rn+' out of '+currentRandomGroupMatch+' ('+"+JSON.stringify(allLineNumbers)+"[selectedRule]+')');",
 		*/ //#ENDIF
@@ -3164,25 +3219,25 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 		);
 		var delta = "r"+j+"_delta";
 		var rule = ruleGroup[j];
-		if(rule.hasReplacements) {
-			var cellReplaceFns = [];
-			var indices = [];
-			var ks = [];
-			for(var p = 0; p < rule.patterns.length; p++) {
-				indices[p] = "idx"+j+"_"+p;
-				functionBody.push("var "+indices[p]+" = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"+"+(1+2*p)+"];");
-				if(rule.isEllipsis[p]) {
-					ks[p] = "k"+j+"_"+p;
-					functionBody.push("var "+ks[p]+" = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"+"+(1+2*p+1)+"];");
-				}
-				cellReplaceFns[p] = [];
-				for(var ci = 0; ci < rule.patterns[p].length; ci++) {
-					cellReplaceFns[p][ci] = prefix+"replaceCell"+i+"_"+j+"_"+p+"_"+ci;
-					if(!compileCellReplaceFn(state, cellReplaceFns[p][ci],rule,p,ci)) {
-						delete cellReplaceFns[p][ci];
-					}
+		var cellReplaceFns = [];
+		var indices = [];
+		var ks = [];
+		for(var p = 0; p < rule.patterns.length; p++) {
+			indices[p] = "idx"+j+"_"+p;
+			functionBody.push("var "+indices[p]+" = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"+"+(1+2*p)+"];");
+			if(rule.isEllipsis[p]) {
+				ks[p] = "k"+j+"_"+p;
+				functionBody.push("var "+ks[p]+" = randomGroupMatches[selectedMatch*"+state.randomGroupMatchStride+"+"+(1+2*p+1)+"];");
+			}
+			cellReplaceFns[p] = [];
+			for(var ci = 0; ci < rule.patterns[p].length; ci++) {
+				cellReplaceFns[p][ci] = prefix+"replaceCell"+i+"_"+j+"_"+p+"_"+ci;
+				if(!compileCellReplaceFn(state, cellReplaceFns[p][ci],rule,p,ci)) {
+					delete cellReplaceFns[p][ci];
 				}
 			}
+		}
+		if(rule.hasReplacements) {
 			functionBody = functionBody.concat([
 	    	"var targetIndex = 0|0;"
 	    ]).concat([].concat.apply([],rule.patterns.map(function(pattern, pm, _) {
@@ -3198,18 +3253,30 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 								*/ //#ENDIF				
 			  				cell.replacement ? "result = "+cellReplaceFns[pm][ci]+"(targetIndex) || result;" : "",
 			  				(ci < pattern.length-1) ? "targetIndex += "+delta+";" : ""
-			  			]
-		    	})));
+			  			];
+		    	}))).concat(journaling ?
+						[
+							journalReplaceCall(state,rule,pm,indices[pm],ks[pm])
+						] :
+						[]
+					);
 		    }))
+			).concat(verbose_logging ?
+				[
+					"if(result) {",
+					"safeConsolePrint('<font color=\"green\">Random rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> applied.</font>', false, replacementDescription());",
+				 	"}"
+				] :
+				[]
+			);
+		} else {
+			functionBody = functionBody.concat(verbose_logging ?
+				[
+					"safeConsolePrint('<font color=\"green\">Random rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> applied.</font>', false, replacementDescription());",
+				] :
+				[]
 			);
 		}
-		functionBody.push(
-			"if("+(ruleGroup[j].hasReplacements?"result && ":"")+"applyAtWatchers) {",
-				"for(var w = 0; w < applyAtWatchers.length; w++) {",
-					"applyAtWatchers[w]("+(rules == state.rules ? "\"normal\"" : "\"late\"")+","+i+","+j+","+rule.direction+");",
-				"}",
-			"}"
-		);
 		//apply commands
 		for(var c=0;c<rule.commands.length;c++) {
 			var cmd = rule.commands[c];
@@ -3220,6 +3287,9 @@ function compileRandomRuleGroup(state,rules,prefix,i) {
 			if(verbose_logging) {
 				var logMessage = "<font color=\"green\">Rule <a onclick=\"jumpToLine(\\'"+rule.lineNumber.toString()+"\\');\" href=\"javascript:void(0);\">"+rule.lineNumber.toString() + "</a> triggers command \""+cmd[0]+"\".</font>";
 				functionBody.push("safeConsolePrint("+logMessage+");");
+			}
+			if(journaling) {
+				
 			}
 		}
 		functionBody.push(
@@ -3320,13 +3390,14 @@ function compileRule(state,rules,prefix,i,j) {
 	}
 	var functionBody = [
 		"var anyMatches = false;",
-		(rule.hasReplacements ? "var anyApplications = false;" : "")
+		(rule.hasReplacements ? "var anyApplications = false;" : ""),
+		(journaling ? "journalNextRule("+(state.rules == rules ? "'normal'" : "'late'")+", "+i+", "+j+", "+rule.direction+");" : ""),
 	].concat(generateMatchLoops("", rule, [MATCH_STRONG_CONSISTENCY], cellMatchFns, 
 		function matchOccurred(_prefix, delta, indices, ks) {
 			return [
-		  	"anyMatches = true;"
-		  ].
-			concat(rule.hasReplacements ? 
+		  	"anyMatches = true;",
+				(journaling ? journalMatchCall(state, rule, indices, ks) : "")
+		  ].concat(rule.hasReplacements ? 
 				[
 		    	"var result = false;",
 		    	"var targetIndex = 0|0;"
@@ -3344,24 +3415,21 @@ function compileRule(state,rules,prefix,i,j) {
 			  				cell.replacement ? "result = "+cellReplaceFns[pm][ci]+"(targetIndex) || result;" : "",
 			  				(ci < pattern.length-1) ? "targetIndex += "+delta+";" : ""
 			  			]
-		    	})));
-		    }))).concat("anyApplications = result || anyApplications;") :
+		    	}))).concat([
+						journaling ? journalReplaceCall(state,rule,pm,indices[pm],ks[pm]) : ""
+		    	]);
+		    }))).concat([
+					"anyApplications = result || anyApplications;"
+				]) :
 				[]
-			).
-			concat(verbose_logging ?
+			).concat(verbose_logging ?
 				[
 					(rule.hasReplacements ? "if(result) {":""),
-					"safeConsolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> " + dirMaskName[rule.direction] + " applied.</font>');",
-			   	(rule.hasReplacements ? "}":"")
+					"safeConsolePrint('<font color=\"green\">Rule <a onclick=\"jumpToLine(" + rule.lineNumber + ");\" href=\"javascript:void(0);\">" + rule.lineNumber + "</a> applied.</font>', false, replacementDescription());",
+				 	(rule.hasReplacements ? "}":"")
 				] :
 				[]
-			).concat([
-				"if("+(rule.hasReplacements?"result && ":"")+"applyAtWatchers) {",
-				"for(var w = 0; w < applyAtWatchers.length; w++) {",
-				"applyAtWatchers[w]("+(rules == state.rules ? "\"normal\"" : "\"late\"")+","+i+","+j+","+rule.direction+");",
-				"}",
-				"}"
-			]);
+			);
 		}
 	));
 	var queueCommands = [];
@@ -3556,22 +3624,32 @@ function analyzeRuleGroups(state) {
 
 function compilePrelude(state) {
 	state.preludeName = "__prelude";
-	state.prelude = function() {};
+	var preludeGlobals = [], preludeBody = [];
 	if(state.randomRuleGroupMaxRuleCount != 0) {
 		var maxMatchSize = state.randomRuleGroupMaxMatchCount*(1+2*state.randomRuleGroupMaxPatternCount);
-		var preludeGlobals = [
+		preludeGlobals.push(
 			"var randomGroupMatches = new Int32Array("+maxMatchSize+");",
 			"var currentRandomGroupMatch = 0|0;"
-		];
-		var preludeBody = [
-			"currentRandomGroupMatch = 0|0;"
-		];
-		evalCode(
-			preludeGlobals.join("\n")+"\n"+
-			"function "+state.preludeName+"() {\n"+preludeBody.join("\n")+"\n"+"}"
 		);
-		state.prelude = global[state.preludeName];
+		preludeBody.push(
+			"currentRandomGroupMatch = 0|0;"
+		);
 	}
+	if(journaling) {
+		preludeGlobals.push(
+			"var journal = [];",
+			"var journalStack = [];"
+		);
+		preludeBody.push(
+			"journal = [];", 
+			"journalStack = [{type:'group', rules:[]}];"
+		);
+	}
+	evalCode(
+		preludeGlobals.join("\n")+"\n"+
+		"function "+state.preludeName+"() {\n"+preludeBody.join("\n")+"\n"+"}"
+	);
+	state.prelude = global[state.preludeName];
 }
 
 function evalCode(code) {

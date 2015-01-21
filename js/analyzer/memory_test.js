@@ -146,12 +146,6 @@ var MemoryTest = (function() {
 		}
 	}
 
-	var storedRuleCounts;
-	var storedRuleCategory = Utilities.RC_CATEGORY_WIN;
-	function ruleApplied(rule,ruleGroup,ruleIndex,direction,tuple) {
-		Utilities.incrementRuleCount(storedRuleCounts,LEVEL,storedRuleCategory,ruleGroup,ruleIndex);
-	};
-
 	var tempCentroids;
 	function findDenormCentroids(into) {
 		if(!into || into.length != state.objectCount) { into = new Int32Array(state.objectCount); }

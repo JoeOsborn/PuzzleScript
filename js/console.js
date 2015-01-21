@@ -12,14 +12,14 @@ function jumpToLine(i) {
 }
 
 var consolecache = [];
-function consolePrint(text,urgent) {
+function consolePrint(text,urgent,extra) {
 	if (urgent===undefined) {
 		urgent=false;
 	}
 	if (cache_console_messages&&urgent==false) {		
-		consolecache.push(text);
+		consolecache.push({text:text,extra:extra});
 	} else {
-		addToConsole(text);
+		addToConsole(extra ? "<details><summary>"+text+"</summary><p>"+extra+"</p></details>" : text);
 	}
 }
 
@@ -47,21 +47,29 @@ function consoleCacheDump() {
 	var lastline = "";
 	var times_repeated = 0;
 	var summarised_message = "<br>";
-	for (var i = 0; i < consolecache.length; i++) {
-		if (consolecache[i] == lastline) {
+	var this_summary = "", this_details = "";
+	for (var i = 0; i < consolecache.length+1; i++) {
+		if (i < consolecache.length && consolecache[i].text == lastline) {
 			times_repeated++;
-		} else {
-			lastline = consolecache[i];
-			if (times_repeated > 0) {
-				summarised_message = summarised_message + " (x" + (times_repeated + 1) + ")";
+			if(consolecache[i].extra) {
+				this_details += (times_repeated > 0 ? "<br>" : "") + consolecache[i].extra;
 			}
-			summarised_message += "<br>"
-			summarised_message += lastline;
+		} else {
+			this_summary = lastline;
+			if (times_repeated > 0) {
+				this_summary = this_summary + " (x" + (times_repeated + 1) + ")";
+			}
+			if(this_summary.length) {
+				summarised_message += "<br>";
+				summarised_message += this_details.length ? "<details><summary>"+this_summary+"</summary><p>"+this_details+"</p></details>" : lastline;
+			}
+			this_details = "";
 			times_repeated = 0;
+			this_summary = lastline = i < consolecache.length ? consolecache[i].text : "";
+			this_details = i < consolecache.length ? (consolecache[i].extra || "") : "";
 		}
 	}
 	
-
 	addToConsole(summarised_message);
 }
 

@@ -11,7 +11,7 @@ function compileAndAnalyze(cmd, lev, seed) {
 var Analyzer = (function() {
 	var module = {};
 	
-	module.SKIP_SOLVING = true;
+	module.SKIP_SOLVING = false;
 	
 	module.MODE_NORMAL = "MODE_NORMAL";
 	module.MODE_MEM_TEST = "MODE_MEM_TEST";
@@ -346,7 +346,7 @@ var Analyzer = (function() {
 	module.onEditorGutterClick = function onEditorGutterClick(cm, n) {
 		clearRuleCountDisplay();
 		var mode = switchToNextRuleCountMode();
-		updateRuleCountDisplay();
+		module.updateRuleCountDisplay();
 		consolePrint("The right-hand gutter is now showing counts of rules triggered by "+
 		 (mode == RC_MODE_INTERACTIVE ? "interactive play" :
 		  (mode == RC_MODE_LAST_TURN ? "the last turn (including again-turns)" : 
@@ -829,7 +829,7 @@ var Analyzer = (function() {
 		}
 		storedRuleCounts[data.level][RC_CATEGORY_WIN] = soln.ruleCounts[0];
 		updateLevelHighlights();
-		updateRuleCountDisplay();
+		module.updateRuleCountDisplay();
 		return seenSolutions[level];
 	}
 

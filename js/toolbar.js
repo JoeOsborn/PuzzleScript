@@ -1,12 +1,6 @@
-function memTestClick() {
-	clearConsole();
-	if(typeof Analyzer != "undefined") { Analyzer.mode = Analyzer.MODE_MEM_TEST; }
-	compileAndAnalyze(["restart"]);
-	if(typeof Analyzer != "undefined") { Analyzer.mode = Analyzer.MODE_NORMAL; }
-}
-
 function runClick() {
 	clearConsole();
+  canvas.dispatchEvent(new Event('pzlRun'));
 	compileAndAnalyze(["restart"]);
 }
 
@@ -70,6 +64,7 @@ function saveClick() {
 	loadDropdown.selectedIndex=0;
 
 	setEditorClean();
+  canvas.dispatchEvent(new Event('pzlSave'));
 
 	consolePrint("saved file to local storage",true);
 }
@@ -95,6 +90,7 @@ function loadDropDownChange() {
 			var loadDropdown = document.getElementById('loadDropDown');
 			loadDropdown.selectedIndex=0;
 			unloadGame();
+      canvas.dispatchEvent(new CustomEvent('pzlLoadSave', {detail:{text:saveText, key:key}}));
 			compileAndAnalyze(["restart"]);
 			return;
 	    }
@@ -144,9 +140,15 @@ function levelEditorClick_Fn() {
 	if (textMode || state.levels.length===0) {
 		compileAndAnalyze(["loadLevel",0]);
 		levelEditorOpened=true;
+    canvas.dispatchEvent(new Event('pzlLevelEditorStart'));
     	canvasResize();
 	} else {
 		levelEditorOpened=!levelEditorOpened;
+    if(levelEditorOpened) {
+      canvas.dispatchEvent(new Event('pzlLevelEditorStart'));
+    } else {
+      canvas.dispatchEvent(new Event('pzlLevelEditorFinish'));
+    }
     	canvasResize();
     }
     lastDownTarget=canvas;	
@@ -214,10 +216,12 @@ function shareClick() {
 	var stringifiedGist = JSON.stringify(gistToCreate);
 	githubHTTPClient.send(stringifiedGist);
     lastDownTarget=canvas;	
+  canvas.dispatchEvent(new Event('pzlShare'));
 }
 
 function rebuildClick() {
 	clearConsole();
+  canvas.dispatchEvent(new Event('pzlRebuild'));
 	compileAndAnalyze(["rebuild"],undefined,RandomGen);
 }
 

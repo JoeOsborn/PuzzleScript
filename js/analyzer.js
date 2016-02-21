@@ -166,6 +166,7 @@ var Analyzer = (function() {
 	module.dumpSpec = function dumpSpec() {
 		var input = prefixToSolutionSteps(inputHistory).join(" , ") + " , ...";
 		consolePrint("<br/>Paste this just after the level definition:<br/>(@SPEC:"+input.join(" ")+")<br/>",true);
+    return input.join(" ");
 	};
 	
 	function nextEmptyLine(l) {

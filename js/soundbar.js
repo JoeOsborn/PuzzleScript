@@ -13,6 +13,7 @@ function newSound(instrument) {
 	params.sound_vol = SOUND_VOL;
 	params.sample_rate = SAMPLE_RATE;
 	params.bit_depth = BIT_DEPTH;
+  canvas.dispatchEvent(new CustomEvent('pzlGenerateSound', {detail:{seed:seed, params:params}}));
 	var sound = SoundEffect.generate(params);
 	sound.play();
 }
@@ -25,5 +26,6 @@ function buttonPress() {
 	params.sample_rate = SAMPLE_RATE;
 	params.bit_depth = BIT_DEPTH;
 	var sound = SoundEffect.generate(params);
+  canvas.dispatchEvent(new CustomEvent('pzlGenerateSoundButton', {detail:{seed:seed, params:params}}));
 	sound.play();
 }

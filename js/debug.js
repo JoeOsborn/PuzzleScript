@@ -41,6 +41,7 @@ function dumpTestCase() {
 	var resultarray = [levelDat,input,outputDat,curlevel,loadedLevelSeed];
 	var resultstring = JSON.stringify(resultarray);
 	safeConsolePrint("<br><br><br>"+resultstring+"<br><br><br>",true);
+  return resultstring;
 }
 
 function clearInputHistory() {

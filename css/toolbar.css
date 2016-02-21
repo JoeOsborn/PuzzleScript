@@ -1,3 +1,28 @@
+#uppertoolbar {
+  width:100%;
+}
+
+.hidden {
+  display:none;
+}
+
+.shown {
+  display:block;
+}
+
+#proceedForm {
+  margin: auto;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  overflow:auto;
+  height:75%;
+  width:75%;
+  background:white;
+  z-index:100;
+  padding:20px;
+}
+
+
 /*
 .uppertoolbar {
 	-webkit-touch-callout: none;

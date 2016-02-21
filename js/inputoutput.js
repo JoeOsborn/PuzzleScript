@@ -274,6 +274,7 @@ function levelEditorClick(event,click) {
 			}
 			level.setCell(coordIndex, glyphmask);
 			redraw();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorDraw', {detail:{"glyph":glyph, "mask":glyphmask}}));
 		}
 	}
 	else if (click) {
@@ -281,16 +282,20 @@ function levelEditorClick(event,click) {
 			//add a left row to the map
 			addLeftColumn();			
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorAddColumn', {detail:{"side":"left","size":[level.width,level.height]}}));
 		} else if (mouseCoordX===screenwidth-2) {
 			addRightColumn();
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorAddColumn', {detail:{"side":"right","size":[level.width,level.height]}}));
 		} 
 		if (mouseCoordY===-1) {
 			addTopRow();
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorAddRow', {detail:{"side":"top","size":[level.width,level.height]}}));
 		} else if (mouseCoordY===screenheight-2-editorRowCount) {
 			addBottomRow();
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorAddRow', {detail:{"side":"bottom","size":[level.width,level.height]}}));
 		}
 	}
 }
@@ -306,6 +311,7 @@ function levelEditorRightClick(event,click) {
 		var glyphmask = new BitVec(STRIDE_OBJ);
 		glyphmask.ibitset(state.backgroundid);
 		level.setCell(coordIndex, glyphmask);
+    canvas.dispatchEvent(new CustomEvent('pzlLevelEditorDraw', {detail:{"glyph":"background", "mask":glyphmask}}));
 		redraw();
 	}
 	else if (click) {
@@ -313,16 +319,20 @@ function levelEditorRightClick(event,click) {
 			//add a left row to the map
 			removeLeftColumn();			
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorRemoveColumn', {detail:{"side":"left","size":[level.width,level.height]}}));
 		} else if (mouseCoordX===screenwidth-2) {
 			removeRightColumn();
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorRemoveColumn', {detail:{"side":"right","size":[level.width,level.height]}}));
 		} 
 		if (mouseCoordY===-1) {
 			removeTopRow();
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorRemoveRow', {detail:{"side":"top","size":[level.width,level.height]}}));
 		} else if (mouseCoordY===screenheight-2-editorRowCount) {
 			removeBottomRow();
 			canvasResize();
+      canvas.dispatchEvent(new CustomEvent('pzlLevelEditorRemoveRow', {detail:{"side":"bottom","size":[level.width,level.height]}}));
 		}
 	}
 }
@@ -390,13 +400,16 @@ function onKeyDown(event) {
 
     if (canDump===true) {
         if (event.keyCode===74 && (event.ctrlKey||event.metaKey)) {//ctrl+j
-            dumpTestCase();
+            var tc = dumpTestCase();
+            canvas.dispatchEvent(new CustomEvent("pzlDumpTestCase", {detail:{"testCase":tc}}));
             prevent(event);
         } else if (event.keyCode===75 && (event.ctrlKey||event.metaKey)) {//ctrl+k
+            canvas.dispatchEvent(new CustomEvent("pzlDumpGIF", {detail:{}}));
             makeGIF();
             prevent(event);
         } else if(event.keyCode == 72 && (event.ctrlKey||event.metaKey) && typeof Analyzer != "undefined") {//ctrl-h
-            Analyzer.dumpSpec();
+            var spec = Analyzer.dumpSpec();
+            canvas.dispatchEvent(new CustomEvent("pzlDumpSpec", {detail:{"spec":spec}}));
             prevent(event);
         }
     }
@@ -494,6 +507,7 @@ function checkKey(e,justPressed) {
         {
 //            consolePrint("LEFT");
             inputdir=1;
+          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"left"}}));
         break;
         }
         case 38: //up
@@ -501,6 +515,7 @@ function checkKey(e,justPressed) {
         {
 //            consolePrint("UP");
             inputdir=0;
+          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"up"}}));
         break;
         }
         case 68://d
@@ -508,6 +523,7 @@ function checkKey(e,justPressed) {
         {
 //            consolePrint("RIGHT");
             inputdir=3;
+          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"right"}}));
         break;
         }
         case 83://s
@@ -515,6 +531,7 @@ function checkKey(e,justPressed) {
         {
 //            consolePrint("DOWN");
             inputdir=2;
+          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"down"}}));
         break;
         }
         case 13://enter
@@ -525,6 +542,7 @@ function checkKey(e,justPressed) {
 //            consolePrint("ACTION");
 			if (norepeat_action===false || justPressed) {
             	inputdir=4;
+              canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"act"}}));
             } else {
             	return;
             }
@@ -538,6 +556,7 @@ function checkKey(e,justPressed) {
                 pushInput("undo");
                 DoUndo();
                 canvasResize(); // calls redraw
+                canvas.dispatchEvent(new Event('pzlUndo'));
             	return prevent(e);
             }
             break;
@@ -549,6 +568,7 @@ function checkKey(e,justPressed) {
 	        		pushInput("restart");
 	        		DoRestart();
 	                canvasResize(); // calls redraw
+                canvas.dispatchEvent(new Event('pzlRestart'));
             		return prevent(e);
             	}
             }
@@ -560,6 +580,7 @@ function checkKey(e,justPressed) {
 				goToTitleScreen();	
 		    	tryPlayTitleSound();
 				canvasResize();			
+                canvas.dispatchEvent(new Event('pzlTitle'));
 				return prevent(e)
         	}
         	break;
@@ -570,6 +591,11 @@ function checkKey(e,justPressed) {
         			levelEditorOpened=!levelEditorOpened;
         			restartTarget=backupLevel();
         			canvasResize();
+              if(levelEditorOpened) {
+                canvas.dispatchEvent(new Event('pzlLevelEditorStart'));
+              } else {
+                canvas.dispatchEvent(new Event('pzlLevelEditorFinish'));
+              }
         		}
         		return prevent(e);
         	}
@@ -694,10 +720,12 @@ function update() {
         if (timer/1000>0.3) {
             quittingTitleScreen=false;
             nextLevel();
+            canvas.dispatchEvent(new CustomEvent("pzlLoadLevel", {detail:{"level":curlevel}}));
         }
     }
     if (againing) {
         if (timer>againinterval&&messagetext.length==0) {
+          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"wait"}}));
             if (processInput(-1)) {
                 if(typeof Analyzer !== "undefined") {
                     Analyzer.updateRuleCountDisplay();
@@ -716,6 +744,7 @@ function update() {
             quittingMessageScreen=false;
             if (messagetext==="") {
             	nextLevel();
+              canvas.dispatchEvent(new CustomEvent("pzlLoadLevel", {detail:{"level":curlevel}}));
             } else {
             	messagetext="";
             	textMode=false;
@@ -730,8 +759,10 @@ function update() {
     }
     if (winning) {
         if (timer/1000>0.5) {
+            canvas.dispatchEvent(new Event('pzlWin'));
             winning=false;
             nextLevel();
+            canvas.dispatchEvent(new CustomEvent("pzlLoadLevel", {detail:{"level":curlevel}}));
         }
     }
     if (keybuffer.length>0) {

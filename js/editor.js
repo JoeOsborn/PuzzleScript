@@ -45,9 +45,19 @@ editor.on('mousedown', function(cm, event) {
     playSound(seed);
   } else if (event.target.className == 'cm-LEVEL') {
     if (event.ctrlKey||event.metaKey) {
+      var targetLine = cm.posFromMouse(event).line;
       document.activeElement.blur();  // unfocus code panel
       event.preventDefault();         // prevent refocus
-      compileAndAnalyze(["levelline",cm.posFromMouse(event).line]);
+      compileAndAnalyze(["levelline",targetLine]);
+      var foundLevel = -1;
+			for (var i=state.levels.length-1;i>=0;i--) {
+				var level = state.levels[i];
+				if(level.lineNumber<=targetLine+1) {
+          foundLevel = i;
+          break;
+        }
+      }
+      canvas.dispatchEvent(new CustomEvent("pzlEditorLoadLevel",{detail:{level:foundLevel}}));
     }
   }
 });
@@ -149,6 +159,7 @@ function tryLoadGist(id) {
 			}
 			if(code) {
 				editor.setValue(code);
+        canvas.dispatchEvent(new CustomEvent('pzlLoadGist', {detail:{text:code, key:id}}));
 				if(typeof Analyzer != "undefined") {
 					Analyzer.clear();
 				}
@@ -172,6 +183,7 @@ function tryLoadFile(fileName) {
   		}
   		
 		editor.setValue(fileOpenClient.responseText);
+    canvas.dispatchEvent(new CustomEvent('pzlLoadExample', {detail:{text:fileOpenClient.responseText, key:fileName}}));
 		setEditorClean();
 		unloadGame();
 		if(typeof Analyzer != "undefined") {

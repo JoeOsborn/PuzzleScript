@@ -928,7 +928,7 @@ var SpecCompiler = (function() {
 				switch(spec.value.direction) {
 					case "any":
 						return evaluatePredicate(["result = true;"], rest, trueA, falseA);
-					case "wait":
+					case "tick":
 						return evaluatePredicate(["result = states[si].move == -1;"], rest, trueA, falseA);
 					case "input":
 						return evaluatePredicate(["result = states[si].move != -1;"], rest, trueA, falseA);

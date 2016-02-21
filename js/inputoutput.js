@@ -725,7 +725,7 @@ function update() {
     }
     if (againing) {
         if (timer>againinterval&&messagetext.length==0) {
-          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"wait"}}));
+          	canvas.dispatchEvent(new CustomEvent('pzlAgain', {detail:{}}));
             if (processInput(-1)) {
                 if(typeof Analyzer !== "undefined") {
                     Analyzer.updateRuleCountDisplay();
@@ -780,6 +780,7 @@ function update() {
         autotick+=deltatime;
         if (autotick>autotickinterval) {
             autotick=0;
+          	canvas.dispatchEvent(new CustomEvent('pzlMove', {detail:{"direction":"tick"}}));
             pushInput("tick");
             if (processInput(-1)) {
                 if(typeof Analyzer !== "undefined") {
